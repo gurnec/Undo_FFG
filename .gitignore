@@ -1,0 +1,6 @@
+__pycache__/
+/build/
+/dist/
+/Undo_MoM2e.spec
+/installer/Undo v1.0 for MoM2e setup.exe
+/installer/vc_redist.x86.exe
