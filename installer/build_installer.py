@@ -17,7 +17,7 @@ atexit.register(lambda: (print('\nPress any key to exit ...', end='', flush=True
 vc_redist = Path(__file__).parent / 'vc_redist.x86.exe'
 assert vc_redist.is_file()
 
-program_files = os.getenv('ProgramFiles(x86)')or os.getenv('ProgramFiles')
+program_files = os.getenv('ProgramFiles(x86)') or os.getenv('ProgramFiles')
 assert program_files
 makensis = Path(program_files) / r'NSIS\makensis.exe'
 assert makensis.is_file()
