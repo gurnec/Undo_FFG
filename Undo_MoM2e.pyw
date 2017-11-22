@@ -381,8 +381,22 @@ class UndoApplication(ttk.Frame):
     def handle_save_as_clicked(cls):
         selected = app.states_treeview.selection()
         assert selected and len(selected) == 1
-        hexhash  = selected[0]
-        filename = app.states_treeview.set(hexhash, 'timestamp').replace(':', '.')  # gets the timestamp from the treeview
+        hexhash   = selected[0]
+        scenario  = app.states_treeview.set(hexhash, 'scenario')
+        players   = app.states_treeview.set(hexhash, 'players')
+        round     = app.states_treeview.set(hexhash, 'round')
+        timestamp = app.states_treeview.set(hexhash, 'timestamp')
+        filename  = ''
+        if scenario:
+            filename += scenario
+            if players:
+                filename += f' ({players}p)'
+            filename += ', '
+        elif players:
+            filename += f'{players} players, '
+        if round:
+            filename += f'round {round}, '
+        filename += timestamp[:-3].replace(':', '.')
         filename = filedialog.asksaveasfilename(title='Save Undo State as', initialfile=filename, **cls.FILEDIALOG_ARGS)
         if filename:
             glob_pattern = f'????-??-?? ??.??.?? {hexhash}.zip'
@@ -415,7 +429,9 @@ class UndoApplication(ttk.Frame):
 
     @staticmethod
     def handle_open_mom_clicked():
+        root.config(cursor='wait')
         os.startfile('steam://run/478980')  # see https://developer.valvesoftware.com/wiki/Steam_browser_protocol
+        root.config(cursor='')
 
     @staticmethod
     def handle_settings_clicked():
