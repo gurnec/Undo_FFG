@@ -2,8 +2,8 @@
 
 !include MUI2.nsh
 
-Name "Undo for Mansions of Madness"
-OutFile "Undo_v1.0_for_MoM2e_setup.exe"
+Name "Undo for FFG Games"
+OutFile "Undo_v1.0_for_FFG_setup.exe"
 
 RequestExecutionLevel admin
 ManifestSupportedOS all
@@ -23,7 +23,7 @@ Var StartMenuFolder
 
 !define MUI_STARTMENUPAGE_REGISTRY_ROOT "HKLM"
 !define MUI_STARTMENUPAGE_REGISTRY_KEY "Software\Undo for MoM2e"
-!define MUI_STARTMENUPAGE_REGISTRY_VALUENAME "Start Menu folder"
+!define MUI_STARTMENUPAGE_REGISTRY_VALUENAME "FFG Start Menu folder"
 !insertmacro MUI_PAGE_STARTMENU Application $StartMenuFolder
 
 !insertmacro MUI_PAGE_INSTFILES
@@ -37,11 +37,11 @@ Var StartMenuFolder
 !insertmacro MUI_LANGUAGE "English"
 
 VIProductVersion "1.0.0.0"
-VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductName" "Undo for Mansions of Madness"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductName" "Undo for FFG Games"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductVersion" "1.0"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "Comments" "Installer distributed from https://github.com/gurnec/Undo_MoM2e/releases"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalCopyright" "Copyright © 2017 Christopher Gurnee. All rights reserved."
-VIAddVersionKey /LANG=${LANG_ENGLISH} "FileDescription" "Installer from https://github.com/gurnec/Undo_MoM2e/releases"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "FileDescription" "Undo for FFG Games Installer"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "FileVersion" "1.0"
 
 
@@ -74,18 +74,27 @@ Section
     File ..\LICENSE.txt
     IfErrors abort_on_error
 
+    ; Delete any old Start Menu shortcuts (the Start Menu folder has been renamed)
+    ReadRegStr $1 HKLM "Software\Undo for MoM2e" "Start Menu folder"
+    ${if} $1 != ""
+        Delete "$SMPROGRAMS\$1\Undo for Mansions of Madness.lnk"
+        Delete "$SMPROGRAMS\$1\Uninstall Undo for MoM.lnk"
+        RMDir  "$SMPROGRAMS\$1"
+        DeleteRegValue HKLM "Software\Undo for MoM2e" "Start Menu folder"
+    ${EndIf}
+
     ; Install the Start Menu shortcuts
     !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
         CreateDirectory "$SMPROGRAMS\$StartMenuFolder"
-        CreateShortcut  "$SMPROGRAMS\$StartMenuFolder\Undo for Mansions of Madness.lnk" "$INSTDIR\Undo_MoM2e.exe"
-        CreateShortcut  "$SMPROGRAMS\$StartMenuFolder\Uninstall Undo for MoM.lnk" "$INSTDIR\Uninstall.exe"
+        CreateShortcut  "$SMPROGRAMS\$StartMenuFolder\Undo for Mansions of Madness.lnk" "$INSTDIR\Undo_MoM2e.exe" "--game=mom"
+        CreateShortcut  "$SMPROGRAMS\$StartMenuFolder\Uninstall Undo for FFG.lnk" "$INSTDIR\Uninstall.exe"
     !insertmacro MUI_STARTMENU_WRITE_END
 
     ; Install the uninstaller
     WriteUninstaller "$INSTDIR\Uninstall.exe"
     WriteRegStr   HKLM "Software\Undo for MoM2e" "" $INSTDIR
     WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "DisplayIcon" "$INSTDIR\Undo_MoM2e.ico"
-    WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "DisplayName" "Undo for Mansions of Madness"
+    WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "DisplayName" "Undo for FFG Games"
     WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "DisplayVersion" "1.0"
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "EstimatedSize" 16690
     WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "HelpLink" "https://github.com/gurnec/Undo_MoM2e/issues"
@@ -128,7 +137,7 @@ Section "Uninstall"
 
     !insertmacro MUI_STARTMENU_GETFOLDER Application $StartMenuFolder
     Delete "$SMPROGRAMS\$StartMenuFolder\Undo for Mansions of Madness.lnk"
-    Delete "$SMPROGRAMS\$StartMenuFolder\Uninstall Undo for MoM.lnk"
+    Delete "$SMPROGRAMS\$StartMenuFolder\Uninstall Undo for FFG.lnk"
     RMDir  "$SMPROGRAMS\$StartMenuFolder"
 
     DeleteRegKey HKLM "Software\Undo for MoM2e"  ; settings are in %APPDATA%, they aren't deleted

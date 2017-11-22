@@ -29,7 +29,7 @@ VSVersionInfo(
       [
       StringTable(
         u'040904b0',
-        [StringStruct(u'FileDescription', u'Undo for Mansions of Madness'),
+        [StringStruct(u'FileDescription', u'Undo for FFG Games'),
         StringStruct(u'FileVersion', u'1.0.0.0'),
         StringStruct(u'LegalCopyright', u'Copyright © 2017 Christopher Gurnee. All rights reserved.'),
         StringStruct(u'OriginalFilename', u'Undo_MoM2e.exe')])

@@ -2,5 +2,6 @@ __pycache__/
 /build/
 /dist/
 /Undo_MoM2e.spec
+/installer/Undo_v*_for_FFG_setup.exe
 /installer/Undo_v1.0_for_MoM2e_setup.exe
 /installer/vc_redist.x86.exe

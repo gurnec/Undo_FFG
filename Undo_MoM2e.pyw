@@ -40,6 +40,23 @@ __version__ = '1.0'
 DEFAULT_MAX_UNDO_STATES = 20
 
 
+MOM = 'MoM'
+DEFAULT_GAME = MOM
+if __name__ == '__main__':
+    if len(sys.argv) > 1:
+        if len(sys.argv) == 2 and sys.argv[1].startswith('--game='):
+            if sys.argv[1][7:].lower() == 'mom':
+                FFG_GAME = MOM
+            else:
+                sys.exit(f'Unsupported game, must be one of: mom')
+        else:
+            sys.exit(f'Usage: {sys.argv[0]} [--game=mom]')
+    else:
+        FFG_GAME = DEFAULT_GAME
+else:
+    FFG_GAME = DEFAULT_GAME
+
+
 # Return the binary hash of the files inside a MoM SaveGame directory
 EMPTY_BINHASH = hashlib.md5().digest()
 def dir_binhash(directory):
@@ -190,11 +207,17 @@ def parse_savegame(savefile):
     return tiles, monsters
 
 
-# Directory constants
-APPDATA_DIR  = Path(os.environ['APPDATA'])
-MYDATA_DIR   = APPDATA_DIR / 'Undo for MoM2e'
-MOMSAVES_DIR = APPDATA_DIR / r'..\LocalLow\Fantasy Flight Games\Mansions of Madness Second Edition\SavedGame'
+# Directory & filename constants
+APPDATA_DIR = Path(os.environ['APPDATA'])
+MYDATA_DIR  = APPDATA_DIR / 'Undo for MoM2e'
 SETTINGS_FILENAME = MYDATA_DIR / 'settings.json'
+if FFG_GAME == MOM:
+    SAVEGAME_DIR = APPDATA_DIR / r'..\LocalLow\Fantasy Flight Games\Mansions of Madness Second Edition\SavedGame'
+
+# Game-specific GUI strings
+if FFG_GAME == MOM:
+    GAME_NAME_TEXT  = 'Mansions of Madness'
+    OPEN_BUTON_TEXT = 'Open Mansions\nof Madness'
 
 # Settings (all one of them)
 settings = {}
@@ -223,7 +246,7 @@ class UndoApplication(ttk.Frame):
 
     def __init__(self, master = None):
         super().__init__(master)
-        self.master.title(f'Undo v{__version__} for Mansions of Madness')
+        self.master.title(f'Undo v{__version__} for {GAME_NAME_TEXT}')
         self.master.iconbitmap('Undo_MoM2e.ico')
 
         # Frame for treeview-related widgets
@@ -291,7 +314,7 @@ class UndoApplication(ttk.Frame):
         self.master.bind('<Alt_L><t>', lambda e: settings_button.invoke())
         self.master.bind('<Alt_R><t>', lambda e: settings_button.invoke())
 
-        open_mom_button = ttk.Button(frame, text='Open Mansions\nof Madness',
+        open_mom_button = ttk.Button(frame, text=OPEN_BUTON_TEXT,
             command=self.handle_open_mom_clicked, underline=0)
         open_mom_button.pack(side=tk.BOTTOM, fill=tk.X, pady=button_pady)  # gets placed *above* the settings button,
         open_mom_button.lower(settings_button)                             # so move its tab-stop before settings too
@@ -306,7 +329,7 @@ class UndoApplication(ttk.Frame):
         self.save_as_button.config(state=new_state)
 
     FILEDIALOG_ARGS = dict(
-        filetypes        = (('Mansions of Madness Undo files', '*.undo'), ('All files', '*')),
+        filetypes        = ((f'{GAME_NAME_TEXT} Undo files', '*.undo'), ('All files', '*')),
         defaultextension = '.undo')
 
     @classmethod
@@ -353,7 +376,7 @@ class UndoApplication(ttk.Frame):
                 else:
                     raise BadZipFile("can't find either GameData.dat or MoM_SaveGame")
         except BadZipFile as e:
-            messagebox.showerror('Error', f'This file is not a Mansions of Madness Undo file.\n({e})')
+            messagebox.showerror('Error', f'This file is not a {GAME_NAME_TEXT} Undo file.\n({e})')
             return
 
         restore_undo_state(filename)
@@ -402,7 +425,7 @@ def load_undo_states():
     assert len(known_undostate_hexhashes)          == 0
     assert len(app.states_treeview.get_children()) == 0
     cur_savegame_found   = False
-    cur_savegame_hexhash = binhash_to_hexhash(dir_binhash(MOMSAVES_DIR))
+    cur_savegame_hexhash = binhash_to_hexhash(dir_binhash(SAVEGAME_DIR))
 
     zip_filenames = list(MYDATA_DIR.glob(f'????-??-?? ??.??.?? {"?"*HEXHASH_LEN}.zip'))
     zip_filenames.sort()  # sorts from oldest to newest
@@ -476,7 +499,7 @@ def handle_new_savegame(event = None):
     zipper    = ZipFile(inmem_zip, 'w', compression=ZIP_DEFLATED)
     hash      = hashlib.md5()
     scenario = players = round = tiles = monsters = ''
-    for f in MOMSAVES_DIR.iterdir():
+    for f in SAVEGAME_DIR.iterdir():
         if f.is_file():
             zipper.write(f, f.name)
             if f.stem.lower() == 'log':
@@ -530,7 +553,7 @@ def trim_undo_states():
 
 # If MoM is being played, alert the user and return True, else return False
 def is_mom_running():
-    log_filename = MOMSAVES_DIR / 'Log'
+    log_filename = SAVEGAME_DIR / 'Log'
     if log_filename.is_file() and not can_open_exclusively(log_filename):
         messagebox.showwarning('Error', 'Please save your game and quit to the main\n'
                                         'menu in order to restore an Undo State.')
@@ -566,12 +589,12 @@ def restore_undo_state(zip_filename):
             watcher_skip_next = True  # tell the directory watcher thread to skip the following changes
             for zipped_filename in unzipper.namelist():
                 if zipped_filename == Path(zipped_filename).name:  # ensures we're unzipping to only the SaveGame dir
-                    unzipper.extract(zipped_filename, MOMSAVES_DIR)
+                    unzipper.extract(zipped_filename, SAVEGAME_DIR)
                     extracted_filenames.append(zipped_filename)
     except Exception:
         # Undo any file extractions if there were any errors
         for filename in extracted_filenames:
-            filename = MOMSAVES_DIR / filename
+            filename = SAVEGAME_DIR / filename
             try:
                 filename.unlink()
             except Exception:
@@ -611,18 +634,18 @@ def main():
         root.config(cursor='wait')
         root.update()
 
-        if not MOMSAVES_DIR.is_dir():
+        if not SAVEGAME_DIR.is_dir():
             answered_yes = messagebox.askyesno("Can't find SaveGame folder",
-                "Undo can't find the Mansions of Madness SaveGame folder. This is usually "
-                "because Mansions of Madness has never been started before on this computer. "
+               f"Undo can't find the {GAME_NAME_TEXT} SaveGame folder. This is usually "
+               f"because {GAME_NAME_TEXT} has never been started before on this computer. "
                 "Would you like to start it now? (If you choose No, Undo will exit.)",
                 icon=messagebox.QUESTION, default=messagebox.YES)
             if answered_yes:
                 app.handle_open_mom_clicked()
-                WaitForDirDialog(root, MOMSAVES_DIR)  # wait for the directory to be created
-            if not MOMSAVES_DIR.is_dir():  # if it's still not there, then the user must have chosen to exit
+                WaitForDirDialog(root, SAVEGAME_DIR)  # wait for the directory to be created
+            if not SAVEGAME_DIR.is_dir():  # if it's still not there, then the user must have chosen to exit
                 root.destroy()
-                sys.exit("Can't find the Mansions of Madness SaveGame folder.")
+                sys.exit(f"Can't find the {GAME_NAME_TEXT} SaveGame folder.")
 
         MYDATA_DIR.mkdir(exist_ok=True)
 
@@ -632,7 +655,7 @@ def main():
 
         root.bind('<<new_savegame>>',  handle_new_savegame)
         root.bind('<<watcher_error>>', handle_watcher_error)
-        watcher_thread = threading.Thread(target=watch_directory, args=(MOMSAVES_DIR, send_new_savegame_event), daemon=True)
+        watcher_thread = threading.Thread(target=watch_directory, args=(SAVEGAME_DIR, send_new_savegame_event), daemon=True)
         watcher_thread.start()
 
         restore_window_thread = threading.Thread(target=restore_window_listener, args=(exclusive_pipe,), daemon=True)
@@ -652,7 +675,7 @@ class WaitForDirDialog(simpledialog.Dialog):
         super().__init__(parent, 'Waiting ...')
     def body(self, master):
         self.resizable(tk.FALSE, tk.FALSE)
-        ttk.Label(self, text='Waiting for Mansions of Madness to finish starting ...').pack(pady=8)
+        ttk.Label(self, text=f'Waiting for {GAME_NAME_TEXT} to finish starting ...').pack(pady=8)
         progress_bar = ttk.Progressbar(self, length=350, mode='indeterminate')
         progress_bar.pack(padx=16)
         progress_bar.start()
