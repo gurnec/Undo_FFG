@@ -27,14 +27,14 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-import threading, io, hashlib, collections, json, shutil, \
+import threading, io, hashlib, collections, json, shutil, contextlib, \
        ctypes, ctypes.wintypes, sys, os, time, traceback
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED, BadZipFile
 from multiprocessing.connection import Listener, Client
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, filedialog
-import dotnetBinaryFormatter2JSON
+import nrbf
 
 __version__ = '1.0'
 DEFAULT_MAX_UNDO_STATES = 20
@@ -149,112 +149,44 @@ def can_open_exclusively(filepath):
     return True
 
 
-# With the help of dotnetBinaryFormatter2JSON, parse the contents of a GameData.dat file
-# to retrieve the scenario name, player count, and round number (ignoring most errors)
-def parse_gamedata(savedata):
-    round = scenario = players = ''
-    try:
-        savedata = dotnetBinaryFormatter2JSON.parse_objects(savedata)
-        for object in savedata:
-            # 'ClassWithMembers' contains both a class definition and one object instance
-            if object[0].startswith('ClassWithMembers'):
-                # We're looking for the GameDataModel class definition & its first (& only) instance
-                classinfo = object[1]['ClassInfo']  # the class definition
-                if classinfo['Name'] == 'GameDataModel':
-                    instance = object[1]['Values']  # the object instance containing the actual member values
+@contextlib.contextmanager
+def ignored(*exceptions):
+    try: yield
+    except exceptions: pass
 
-                    # Search through the class's member names
-                    for i, member_name in enumerate(classinfo['MemberNames']):
-                        if member_name == 'Round':
-                            # The Round value is a primitive stored directly in the object instance
-                            round = instance[i][1]
-                        elif member_name == 'VariantName':
-                            # The VariantName is a string stored in a string object inside the object instance
-                            scenario = instance[i][1][1]['Value']
-                            # Remove the last word (I suspect it's the map variant)
-                            scenario = ' '.join(scenario.split()[:-1])
-                        elif member_name == 'InvestigatorIds':
-                            # The InvestigatorIds is a comma-separated string; count it's values
-                            players = len(instance[i][1][1]['Value'].split(','))
-
-    except LookupError:
-        traceback.print_exc()
+# Read the contents of a GameData.dat file to retrieve the scenario name,
+# player count, and round number (ignoring errors resulting from format changes)
+def parse_gamedata(savefile):
+    savedata = nrbf.read_stream(savefile)
+    scenario = players = round = ''
+    # Remove the last word of the VariantName (I suspect it's the map variant):
+    with ignored(AttributeError): scenario = savedata.VariantName[:savedata.VariantName.rfind(' ')]
+    # InvestigatorIds is a comma-separated string; count its values:
+    with ignored(AttributeError): players = savedata.InvestigatorIds.count(',') + 1
+    with ignored(AttributeError): round   = savedata.Round
     return scenario, players, round
 
-
-# With the help of dotnetBinaryFormatter2JSON, parse the contents of a MoM_SaveGame file
-# to retrieve the tile count and monster count (ignoring most errors)
-def parse_savegame(savedata):
-    tiles = monsters = 0
-    tile_class_id = tile_object = monster_class_id = monster_object = None
+# Read the contents of a MoM_SaveGame file to retrieve the tile count
+# and monster count (ignoring errors resulting from format changes)
+def parse_savegame(savefile):
+    savedata = nrbf.read_stream(savefile)
+    tiles = 0
     try:
-        savedata = dotnetBinaryFormatter2JSON.parse_objects(savedata)
-        for object in savedata:
-            # 'ClassWithMembers' contains both a class definition and one object instance
-            if object[0].startswith('ClassWithMembers'):
-                classinfo = object[1]['ClassInfo']  # the class definition
-                instance  = object[1]['Values']     # the object instance containing the actual member values
-
-                # MoM can apparently only be saved during the Investigator Phase, so the phase is always the same
-                #
-                # # The 'FFG.MoM.MoM_GameSerializer+MoM_SerializedGame' class definition & its first (& only) instance
-                # if classinfo['Name'] == 'FFG.MoM.MoM_GameSerializer+MoM_SerializedGame':
-                #     # Search through the class's member names for the 'CurrentPhase' member
-                #     for i, member_name in enumerate(classinfo['MemberNames']):
-                #         if member_name == 'CurrentPhase':
-                #             # The phase value is stored inside another object; extract it
-                #             values_object = instance[i][1][1]['Values']
-                #             assert len(values_object) == 1  # the inner class should have only one member
-                #             phase = values_object[0][1]
-                #             break
-
-                # The FFG.MoM.MoM_SavedTile class definition & its first instance
-                if classinfo['Name'] == 'FFG.MoM.MoM_SavedTile':
-                    # Save the class ID to identify future FFG.MoM.MoM_SavedTile instances
-                    tile_class_id = classinfo['ObjectId']
-                    # Search through the class's member names for the 'Visible' member
-                    for i, member_name in enumerate(classinfo['MemberNames']):
-                        if member_name == 'Visible':
-                            # Save the index of the Visible member for later checking of instances
-                            tile_visible_member_num = i
-                            break
-                    tile_object = instance  # the actual checking of Visible's value is done later
-
-                # The FFG.MoM.MoM_SavedNodeMonster class definition & its first instance
-                elif classinfo['Name'] == 'FFG.MoM.MoM_SavedNodeMonster':
-                    # Save the class ID to identify future FFG.MoM.MoM_SavedNodeMonster instances
-                    monster_class_id = classinfo['ObjectId']
-                    # Save all the MemberNames and their indexes for later use
-                    monster_member_names_to_nums = {name:i for i,name in enumerate(classinfo['MemberNames'])}
-                    # The actual checking of the monster_object's member values is done later
-                    monster_object = instance
-                    # Convenience function which returns the named member value of the saved monster_object
-                    monster_value = lambda name: monster_object[monster_member_names_to_nums[name]][1]
-
-            # 'ClassWithId' contains one object instance and a class ID to identify its type
-            elif object[0] == 'ClassWithId':
-                if object[1]['MetadataId']   == tile_class_id:     # if it's an FFG.MoM.MoM_SavedTile,
-                    tile_object    = object[1]['Values']           #   save the instance for value checking just below
-                elif object[1]['MetadataId'] == monster_class_id:  # if it's an FFG.MoM.MoM_SavedNodeMonster,
-                    monster_object = object[1]['Values']           #   save the instance for value checking just below
-
-            # If we saved an instance above to examine its member values,
-            # do so now and check if we should increment the respective counter
-            if tile_object:
-                if tile_object[tile_visible_member_num][1]:  # if the tile is visible
-                    tiles += 1
-                tile_object = None
-            elif monster_object:
+        for tile in savedata.TileSaveData.values():
+            tiles += 1 if tile.Visible else 0
+    except AttributeError:
+        tiles = ''
+    monsters = 0
+    try:
+        for node in savedata.NodeSaveData.values():
+            if type(node).__name__ == 'FFG_MoM_MoM_SavedNodeMonster':
                 # Generated monsters are always visible, and of course so are
-                # 'Visible' ones, but either is only visible if it's still alive.
-                if (monster_value('WasGenerated') or monster_value('Visible')) and \
-                   (monster_value('DamageCount')  <  monster_value('MaxDamage')):
+                # 'Visible' ones, but either is only present if it's still alive.
+                if (node.WasGenerated or node.Visible) and \
+                   (node.DamageCount < node.MaxDamage):
                     monsters += 1
-                monster_object = None
-
-    except LookupError:
-        traceback.print_exc()
-        tiles = monsters = ''  # can't trust either of these if there's an error anywhere while parsing
+    except AttributeError:
+        monsters = ''
     return tiles, monsters
 
 
@@ -486,11 +418,11 @@ def load_undo_states():
         with ZipFile(zip_filename) as zipper:
             for zipped_filename in zipper.namelist():
                 if zipped_filename.lower() == 'gamedata.dat':
-                    data = zipper.read(zipped_filename)
-                    scenario, players, round = parse_gamedata(data)
+                    with zipper.open(zipped_filename) as savefile:
+                        scenario, players, round = parse_gamedata(savefile)
                 elif zipped_filename.lower() == 'mom_savegame':
-                    data = zipper.read(zipped_filename)
-                    tiles, monsters = parse_savegame(data)
+                    with zipper.open(zipped_filename) as savefile:
+                        tiles, monsters = parse_savegame(savefile)
 
         # Insert the Undo State into the treeview UI at the top
         app.states_treeview.insert('', 0, hexhash,
@@ -549,12 +481,13 @@ def handle_new_savegame(event = None):
             zipper.write(f, f.name)
             if f.stem.lower() == 'log':
                 continue
-            data = f.read_bytes()
-            hash.update(data)
+            hash.update(f.read_bytes())
             if f.name.lower() == 'gamedata.dat':
-                scenario, players, round = parse_gamedata(data)
+                with f.open('rb') as savefile:
+                    scenario, players, round = parse_gamedata(savefile)
             elif f.name.lower() == 'mom_savegame':
-                tiles, monsters = parse_savegame(data)
+                with f.open('rb') as savefile:
+                    tiles, monsters = parse_savegame(savefile)
     zipper.close()
     binhash = hash.digest()
 
