@@ -34,7 +34,7 @@ from copy        import deepcopy
 from datetime    import datetime, timedelta, timezone
 from decimal     import Decimal
 from keyword     import iskeyword
-from struct      import unpack, calcsize
+from struct      import Struct, calcsize, pack
 from namedlist   import namedlist
 
 
@@ -52,13 +52,23 @@ def _register_reader(type_dict, enum_value):
 
 
 class serialization:
-    def __init__(self):
-        self._file                  = None
+    def __init__(self, streamfile, can_overwrite_member = False):
+        '''
+        :param streamfile: a file-like object in .NET Remoting Binary Format
+        :param can_overwrite_member: iff True, overwrite_member() may be called
+        '''
+        assert streamfile.readable()
+        if can_overwrite_member:
+            assert streamfile.writable()
+            assert streamfile.seekable()
+        self._file                  = streamfile
         self._Class_by_id           = {}    # see _read_ClassInfo()
         self._objects_by_id         = {}    # all referenceable objects indexed by ObjectId
         self._root_id               = None  # the id of the single root object
         self._member_references     = []    # all seen simple references, see _read_MemberReference()
         self._collection_references = []    # all seen collection references, e.g. .NET dicts and lists
+        self._add_overwrite_info     = can_overwrite_member
+        self._overwrite_info_by_pyid = {}   # if above is True, overwrite_info objs indexed by python id()
 
     # Below are a set of "readers" and other support types, one per defined structure
     # in revision 11.0 of the ".NET Remoting: Binary Format Data Structure" specification
@@ -129,7 +139,8 @@ class serialization:
 
     # Creates the rest of the PrimitiveType readers (those based on struct.unpack);
     # this only works when it's called after the class has been fully defined.
-    _array_format_by_primitive_type = {}  # array-format-specs indexed by PrimitiveTypeEnumeration length-one bytes
+    _array_format_by_primitive_type  = {}  # array-format-specs  indexed by PrimitiveTypeEnumeration length-one bytes
+    _struct_format_by_primitive_type = {}  # struct-format-specs indexed by PrimitiveTypeEnumeration length-one bytes
     @classmethod
     def _create_PrimitiveType_readers(cls):
         for enum_value, name, format in (
@@ -147,8 +158,10 @@ class serialization:
             enum_value = bytes([enum_value])  # convert from int to length-one bytes
             if format[-1] in typecodes:  # if the format can also be used to create an array type
                 cls._array_format_by_primitive_type[enum_value] = format[-1]  # (the [-1] skips the '<' flag)
+            cls._struct_format_by_primitive_type[enum_value] = format
+            struct = Struct(format)
             length = calcsize(format)
-            reader = lambda self, f=format, l=length: unpack(f, self._file.read(l))[0]
+            reader = lambda self, s=struct, l=length: s.unpack(self._file.read(l))[0]
             setattr(cls, name, _register_reader(cls._PrimitiveType_readers, enum_value)(reader))
 
     # The ClassTypeInfo structure is read and ignored
@@ -273,11 +286,25 @@ class serialization:
         Class = self._Class_by_id[self._read_Int32()]  # MetadataId
         return self._read_members_into(Class(), object_id, Class._primitive_types.get)
 
-    def _read_Record_or_Primitive(self, primitive_type):
+    # If primitive_type is not None, read the specified primitive_type with one of the
+    # PrimitiveType_readers. Otherwise read the next RecordType in the filestream with
+    # one of the RecordType_readers. If overwrite_info is not None, add overwrite info
+    # (a tuple containing: file position, struct type) to overwrite_info[overwrite_index]
+    # if the value read is an overwritable primitive. Finally, returns the value read.
+    def _read_Record_or_Primitive(self, primitive_type, overwrite_info = None, overwrite_index = None):
         if primitive_type:
+            if overwrite_info is not None:
+                format = self._struct_format_by_primitive_type.get(primitive_type)
+                if format:
+                    overwrite_info[overwrite_index] = self._file.tell(), format
             return self._PrimitiveType_readers[primitive_type](self)
         else:
-            return self._RecordType_readers[self._file.read(1)](self)
+            record_type = self._file.read(1)
+            # If overwrite_info is not None and record_type == MemberPrimitiveTyped, parse it ourselves--
+            # read in the PrimitiveTypeEnum and call ourselves to finish parsing and add the overwrite_info
+            if overwrite_info is not None and record_type == '\x08':
+                return self._read_Record_or_Primitive(self._file.read(1), overwrite_info, overwrite_index)
+            return self._RecordType_readers[record_type](self)
 
     _Reference = namedlist('_Reference',  # see _read_MemberReference()
         'id parent index_in_parent resolved collection_resolver orig_obj', default=None)
@@ -285,12 +312,17 @@ class serialization:
     # Reads members or array elements into the 'obj' pre-allocated list or class instance
     def _read_members_into(self, obj, object_id, members_primitive_type):
         assert callable(members_primitive_type)  # when called with the member_num, returns any respective primitive type
+        if self._add_overwrite_info:
+            # create the object which will store the overwrite info for all the members in obj
+            overwrite_info = [None] * len(obj) if isinstance(obj, list) else obj.__class__()
+        else:
+            overwrite_info = None
         member_num = 0
         while member_num < len(obj):
             primitive_type = members_primitive_type(member_num)
-            val = self._read_Record_or_Primitive(primitive_type)
+            val = self._read_Record_or_Primitive(primitive_type, overwrite_info, member_num)
             if isinstance(val, self._BinaryLibrary):  # a BinaryLibrary can precede the actual member, it's ignored
-                val = self._read_Record_or_Primitive(primitive_type)
+                val = self._read_Record_or_Primitive(primitive_type, overwrite_info, member_num)
             if isinstance(val, self._ObjectNullMultiple):  # represents one or more empty members
                 member_num += val.count
                 continue
@@ -299,6 +331,8 @@ class serialization:
                 val.index_in_parent = member_num
             obj[member_num] = val
             member_num += 1
+        if overwrite_info is not None:
+            self._overwrite_info_by_pyid[id(obj)] = overwrite_info
         # If this object is a .NET collection (e.g. a Generic dict or list) which can be
         # replaced by a native Python type, insert a collection _Reference instead of the raw
         # object which will be resolved later in read_stream() using a "collection resolver"
@@ -399,10 +433,16 @@ class serialization:
 
     assert sys.byteorder in ('little', 'big')
     def _read_Array_native_elements(self, format, length):
+        if self._add_overwrite_info:
+            pos = self._file.tell()
         array = Array(format)
         array.fromfile(self._file, length)  # read them in one call
         if sys.byteorder == 'big':
             array.byteswap()
+        if self._add_overwrite_info:
+            format = '<' + format  # always little-endian
+            self._overwrite_info_by_pyid[id(array)] = [
+                (pos + offset, format) for offset in range(0, length * array.itemsize, array.itemsize) ]
         return array
 
 
@@ -466,11 +506,15 @@ class serialization:
         return self._MessageEnd()
 
 
-    def read_stream(self, streamfile):
-        self._file = streamfile
+    def read_stream(self):
+        '''Read the streamfile in .NET Remoting Binary Format and extract its root object
+
+        :return: the root object contained in the stream
+        '''
         obj = None
         while not isinstance(obj, self._MessageEnd):
             obj = self._read_Record_or_Primitive(primitive_type=False)
+        self._Class_by_id.clear()
 
         # Resolve all the collection references
         for reference in self._collection_references:
@@ -479,17 +523,16 @@ class serialization:
             if reference.parent:
                 reference.parent[reference.index_in_parent] = replacement
             self._objects_by_id[reference.id] = replacement
+        self._collection_references.clear()
 
         # Resolve all the (remaining) simple member references
         for reference in self._member_references:
             self._resolve_simple_reference(reference)
+        self._member_references.clear()
 
         obj = self._objects_by_id[self._root_id]
-        self._file = self._root_id = None
-        self._Class_by_id          .clear()
-        self._objects_by_id        .clear()
-        self._member_references    .clear()
-        self._collection_references.clear()
+        self._objects_by_id.clear()
+        self._root_id = None
         return obj
 
     # Convert a _Reference representing a .NET dictionary collection into a Python dict
@@ -498,7 +541,8 @@ class serialization:
         # If KeyValuePairs is itself a _Reference, it must be resolved first
         if isinstance(orig_obj.KeyValuePairs, self._Reference):
             self._resolve_simple_reference(orig_obj.KeyValuePairs)
-        replacement = {}
+        replacement    = {}
+        overwrite_info = {} if self._add_overwrite_info else None
         for item in orig_obj.KeyValuePairs:
             # If any key is a _Reference, it must be resolved first
             # (value _References will be resolved later)
@@ -507,6 +551,8 @@ class serialization:
                     self._resolve_simple_reference(item.key)
                 assert item.key not in replacement
                 replacement[item.key] = item.value
+                if overwrite_info is not None:
+                    overwrite_info[item.key] = self._overwrite_info_by_pyid[id(item)].value
             except (AssertionError, TypeError):  # not all .NET dictionaries can be converted to Python dicts;
                 replacement = orig_obj           # if the conversion fails, just proceed w/the original object
                 break
@@ -516,6 +562,8 @@ class serialization:
                 if isinstance(value, self._Reference):
                     value.parent          = replacement
                     value.index_in_parent = key
+            if overwrite_info is not None:
+                self._overwrite_info_by_pyid[id(replacement)] = overwrite_info
         return replacement
 
     # Convert a _Reference representing a .NET list collection into a Python list
@@ -546,6 +594,44 @@ class serialization:
         member_ref.resolved = True
 
 
+    def overwrite_member(self, obj, member, value):
+        '''Overwrite an object's member with a new value in the streamfile (does not change obj).
+
+        :param obj: an object in the hierarchy returned by read_stream()
+        :param member: an writable member (attribute) name, index (for lists/arrays), or key (for dicts) in obj
+        :param value: the new value to be written to the streamfile
+        '''
+        assert self._add_overwrite_info, 'serialization object must have been constructed with can_overwrite_member == True'
+        overwrite_info = self._overwrite_info_by_pyid[id(obj)]
+        if isinstance(member, int) or isinstance(obj, dict):
+            pos, format = overwrite_info[member]
+        else:
+            pos, format = getattr(overwrite_info, member)
+        value   = pack(format, value)
+        old_pos = self._file.tell()
+        try:
+            self._file.seek(pos)
+            self._file.write(value)
+        finally:
+            self._file.seek(old_pos)
+
+    def is_member_writable(self, obj, member, value):
+        '''Returns True if the object's member can be overwritten.
+        Raises an exception if the member doesn't exist.
+
+        :param obj: an object in the hierarchy returned by read_stream()
+        :param member: a member (attribute) name, index (for lists/arrays), or key (for dicts) in obj
+        '''
+        assert self._add_overwrite_info, 'serialization object must have been constructed with can_overwrite_member == True'
+        overwrite_info = self._overwrite_info_by_pyid.get(id(obj))
+        if overwrite_info is None:
+            return False
+        if isinstance(member, int) or isinstance(obj, dict):
+            return overwrite_info[member]          is not None
+        else:
+            return getattr(overwrite_info, member) is not None
+
+
 # Finish setting up the serialization class
 serialization._create_PrimitiveType_readers()
 #
@@ -566,21 +652,13 @@ assert all(bytes([i]) in serialization._PrimitiveType_readers if i != 4         
 assert all(bytes([i]) in serialization._RecordType_readers    if not 18 <= i <= 20 else True for i in range(23))
 
 
-_serialization_singleton = None
 def read_stream(streamfile):
     '''Read a file in .NET Remoting Binary Format and extract its root object
 
     :param streamfile: a file-like object
     :return: the root object contained in the stream
     '''
-    global _serialization_singleton
-    if not _serialization_singleton:
-        _serialization_singleton = serialization()
-    try:
-        return _serialization_singleton.read_stream(streamfile)
-    except:
-        _serialization_singleton = None  # it's in an inconsistent state after an exception
-        raise
+    return serialization(streamfile).read_stream()
 
 # A JSONEncoder which can convert an object returned by read_stream() into json
 # (can't handle circular references; primarily intended for debugging purposes)

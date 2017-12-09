@@ -8,7 +8,7 @@ OutFile "Undo_v1.0_for_FFG_setup.exe"
 RequestExecutionLevel admin
 ManifestSupportedOS all
 
-InstallDir "$PROGRAMFILES\Undo for MoM2e"
+InstallDir "$PROGRAMFILES\Undo for FFG Games"
 InstallDirRegKey HKLM "Software\Undo for MoM2e" ""
 
 !define MUI_ICON ..\Undo_MoM2e.ico
@@ -87,7 +87,8 @@ Section
     !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
         CreateDirectory "$SMPROGRAMS\$StartMenuFolder"
         CreateShortcut  "$SMPROGRAMS\$StartMenuFolder\Undo for Mansions of Madness.lnk" "$INSTDIR\Undo_MoM2e.exe" "--game=mom"
-        CreateShortcut  "$SMPROGRAMS\$StartMenuFolder\Uninstall Undo for FFG.lnk" "$INSTDIR\Uninstall.exe"
+        CreateShortcut  "$SMPROGRAMS\$StartMenuFolder\Undo for Road to Legend.lnk"      "$INSTDIR\Undo_MoM2e.exe" "--game=rtl"
+        CreateShortcut  "$SMPROGRAMS\$StartMenuFolder\Uninstall Undo for FFG.lnk"       "$INSTDIR\Uninstall.exe"
     !insertmacro MUI_STARTMENU_WRITE_END
 
     ; Install the uninstaller
@@ -96,7 +97,7 @@ Section
     WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "DisplayIcon" "$INSTDIR\Undo_MoM2e.ico"
     WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "DisplayName" "Undo for FFG Games"
     WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "DisplayVersion" "1.0"
-    WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "EstimatedSize" 16690
+    WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "EstimatedSize" 16707
     WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "HelpLink" "https://github.com/gurnec/Undo_MoM2e/issues"
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "NoModify" 1
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "NoRepair" 1
@@ -136,9 +137,10 @@ Section "Uninstall"
     RMDir    /REBOOTOK "$INSTDIR"
 
     !insertmacro MUI_STARTMENU_GETFOLDER Application $StartMenuFolder
-    Delete "$SMPROGRAMS\$StartMenuFolder\Undo for Mansions of Madness.lnk"
-    Delete "$SMPROGRAMS\$StartMenuFolder\Uninstall Undo for FFG.lnk"
-    RMDir  "$SMPROGRAMS\$StartMenuFolder"
+    Delete /REBOOTOK "$SMPROGRAMS\$StartMenuFolder\Undo for Mansions of Madness.lnk"
+    Delete /REBOOTOK "$SMPROGRAMS\$StartMenuFolder\Undo for Road to Legend.lnk"
+    Delete /REBOOTOK "$SMPROGRAMS\$StartMenuFolder\Uninstall Undo for FFG.lnk"
+    RMDir  /REBOOTOK "$SMPROGRAMS\$StartMenuFolder"
 
     DeleteRegKey HKLM "Software\Undo for MoM2e"  ; settings are in %APPDATA%, they aren't deleted
     DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e"
