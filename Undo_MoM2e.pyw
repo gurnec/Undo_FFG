@@ -232,17 +232,64 @@ def ignored(*exceptions):
     try: yield
     except exceptions: pass
 
-# Read the contents of a MoM GameData.dat file to retrieve the scenario name,
-# player count, and round number (ignoring errors resulting from format changes)
+# Read the contents of a MoM GameData.dat file to retrieve the scenario name, the list of required
+# tile types, a player count, and round number (ignoring errors resulting from format changes)
+MOM_VARIANT_TO_REQDTILES = {
+    'Cycle of Eternity 01A'         : 'Tentacle',
+    'Cycle of Eternity 01B'         : 'Tentacle',
+    'Cycle of Eternity 02A'         : 'Tentacle',
+    'Cycle of Eternity 02B'         : 'Tentacle',
+    'Cycle of Eternity 03A'         : 'Key, Tentacle',
+    'Cycle of Eternity 04A'         : 'Key, Flask, Tentacle',
+    'Cycle of Eternity 05A'         : 'Tentacle, Claw',
+    'Dark Reflections 01A'          : 'Tentacle',
+    'Dark Reflections 02A'          : 'Tentacle, Claw',
+    'Dark Reflections 03A'          : 'Key, Tentacle',
+    'Escape From Innsmouth 01A'     : 'Tentacle',
+    'Escape From Innsmouth 02A'     : 'Tentacle, Arkham',
+    'Rising Tide 01A'               : 'Tentacle',
+    'Shattered Bonds 01A'           : 'Tentacle',
+    'Shattered Bonds 01B'           : 'Tentacle',
+    'Shattered Bonds 02A'           : 'Key, Tentacle',
+    'Shattered Bonds 03A'           : 'Tentacle, Arkham',
+    'What Lies Within 01A'          : 'Tentacle',
+    'What Lies Within 02A'          : 'Tentacle',
+    'What Lies Within 03A'          : 'Key, Tentacle',
+    'What Lies Within 04A'          : 'Flask, Moon, Tentacle',
+    'Dearly Departed 01A'           : 'Key, Tentacle',
+    'Dearly Departed 01B'           : 'Key, Tentacle',
+    'Dearly Departed 02A'           : 'Key, Moon, Tentacle',
+    'Dearly Departed 03A'           : 'Key, Flask, Moon',
+    'Cult of Sentinel Hill 01A'     : 'Moon',
+    'Cult of Sentinel Hill 01B'     : 'Moon',
+    'Cult of Sentinel Hill 02A'     : 'Moon',
+    'Cult of Sentinel Hill 03A'     : 'Moon',
+    'Gates of Silverwood Manor 01A' : 'Tentacle, Claw',
+    'Gates of Silverwood Manor 02A' : 'Tentacle, Claw',
+    'Vengeful Impulses 01A'         : 'Tentacle, Claw',
+    'Vengeful Impulses 01B'         : 'Tentacle, Claw',
+    'Astral Alchemy 01A'            : 'Arkham',
+    'Astral Alchemy 01B'            : 'Arkham',
+    'Astral Alchemy 01C'            : 'Tentacle, Arkham',
+    'Astral Alchemy 02A'            : 'Tentacle, Arkham',
+    'Astral Alchemy 02B'            : 'Tentacle, Arkham',
+    'Astral Alchemy 03A'            : 'Flask, Tentacle, Arkham',
+    'Astral Alchemy 03B'            : 'Flask, Tentacle, Arkham',
+    'Gangs of Arkham 01A'           : 'Tentacle, Arkham',
+    'Ill-Fated Exhibit 01A'         : 'Tentacle, Arkham',
+    'Ill-Fated Exhibit 02A'         : 'Tentacle, Arkham' }
 def parse_mom_gamedata(savefile):
     savedata = nrbf.read_stream(savefile)
-    scenario = players = round = ''
-    # Remove the last word of the VariantName (I suspect it's the map variant):
-    with ignored(AttributeError): scenario = savedata.VariantName[:savedata.VariantName.rfind(' ')]
+    scenario = reqdtiles = players = round = ''
+    with ignored(AttributeError):
+        scenario  = savedata.VariantName
+        reqdtiles = MOM_VARIANT_TO_REQDTILES.get(scenario)
+        if scenario[-3:-2] == '0':
+            scenario = scenario[:-4]
     # InvestigatorIds is a comma-separated string; count its values:
     with ignored(AttributeError): players = savedata.InvestigatorIds.count(',') + 1
     with ignored(AttributeError): round   = savedata.Round
-    return scenario, players, round
+    return scenario, reqdtiles, players, round
 
 # Read the contents of a MoM_SaveGame file to retrieve the tile count, monster count,
 # and highest-threat monster (ignoring errors resulting from format changes)
@@ -436,7 +483,7 @@ class UndoApplication(ttk.Frame):
         ttk.Label(frame, text='Undo States', underline=0).pack(padx=3, pady=3, anchor=tk.W)
 
         if FFG_GAME == MOM:
-            col_headings = 'Scenario', 'Players', 'Round', 'Tiles', 'Monsters', 'Main Threat', 'Timestamp'
+            col_headings = 'Scenario', 'Tiles Required', 'Players', 'Round', 'Tiles', 'Monsters', 'Main Threat', 'Timestamp'
         elif FFG_GAME == RTL:
             col_headings = 'Group', 'Scenario', 'Difficulty', 'Players', 'Quest / Location', 'Round', 'Timestamp'
         else: assert False
@@ -458,7 +505,8 @@ class UndoApplication(ttk.Frame):
             self.states_treeview.column('scenario', width=75)
             self.states_treeview.column('quest / location', width=180)
         if FFG_GAME == MOM:
-            self.states_treeview.column('main threat', width=120)
+            self.states_treeview.column('tiles required', width=140)
+            self.states_treeview.column('main threat',    width=120)
         self.states_treeview.column('timestamp', width=120)
         self.states_treeview.column('current',   width=60)
         for slot in range(SLOT_COUNT):
@@ -697,13 +745,13 @@ def load_undo_states():
         known_undostate_hexhashes[slot][hexhash] = True
 
         # Parse the savegame files inside the zip for display purposes
-        treeview_values = [None] * 3 if FFG_GAME == MOM else []  # for MoM preallocate the first 3
+        treeview_values = [None] * 4 if FFG_GAME == MOM else []  # for MoM preallocate the first 4
         with ZipFile(zip_filename) as zipper:
             for zipped_filename in zipper.namelist():
                 if FFG_GAME == MOM:
                     if zipped_filename.lower() == 'gamedata.dat':
                         with zipper.open(zipped_filename) as savefile:
-                            treeview_values[:3] = parse_mom_gamedata(savefile)
+                            treeview_values[:4] = parse_mom_gamedata(savefile)
                     elif zipped_filename.lower() == 'mom_savegame':
                         with zipper.open(zipped_filename) as savefile:
                             treeview_values.extend(parse_mom_savegame(savefile))
@@ -790,7 +838,7 @@ def handle_new_savegame(slot, use_filetime = False):
     inmem_zip = io.BytesIO()
     zipper    = ZipFile(inmem_zip, 'w', compression=ZIP_DEFLATED)
     hash      = hashlib.md5()
-    treeview_values = [None] * 3 if FFG_GAME == MOM else []  # for MoM preallocate the first 3
+    treeview_values = [None] * 4 if FFG_GAME == MOM else []  # for MoM preallocate the first 4
     main_savename   =  None  # may need the name of the main save file for later
     for f in savegame_dir.iterdir():
         if f.is_file():
@@ -802,7 +850,7 @@ def handle_new_savegame(slot, use_filetime = False):
             if FFG_GAME == MOM:
                 if lower_name == 'gamedata.dat':
                     with f.open('rb') as savefile:
-                        treeview_values[:3] = parse_mom_gamedata(savefile)
+                        treeview_values[:4] = parse_mom_gamedata(savefile)
                 elif lower_name == 'mom_savegame':
                     main_savename = f
                     with f.open('rb') as savefile:
