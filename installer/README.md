@@ -7,4 +7,4 @@
  3. Download `vc_redist.x86.exe` (Microsoft Visual C++ 2015 Redistributable Update 3) into this directory from here:
 <https://www.microsoft.com/en-us/download/details.aspx?id=53587>.
 
- 4. Double-click the `build_installer.py` file in this directory. The built installer (`Undo_v1.0_for_FFG_setup.exe`) will be placed in this directory.
+ 4. Double-click the `build_installer.py` file in this directory. The built installer (`Undo_v2.0_for_FFG_setup.exe`) will be placed in this directory.

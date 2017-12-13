@@ -3,7 +3,7 @@
 !include MUI2.nsh
 
 Name "Undo for FFG Games"
-OutFile "Undo_v1.0_for_FFG_setup.exe"
+OutFile "Undo_v2.0_for_FFG_setup.exe"
 
 RequestExecutionLevel admin
 ManifestSupportedOS all
@@ -36,13 +36,13 @@ Var StartMenuFolder
 
 !insertmacro MUI_LANGUAGE "English"
 
-VIProductVersion "1.0.0.0"
+VIProductVersion "2.0.0.0"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductName" "Undo for FFG Games"
-VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductVersion" "1.0"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductVersion" "2.0"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "Comments" "Installer distributed from https://github.com/gurnec/Undo_FFG/releases"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalCopyright" "Copyright © 2017 Christopher Gurnee. All rights reserved."
 VIAddVersionKey /LANG=${LANG_ENGLISH} "FileDescription" "Undo for FFG Games Installer"
-VIAddVersionKey /LANG=${LANG_ENGLISH} "FileVersion" "1.0"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "FileVersion" "2.0"
 
 
 ; The install script
@@ -97,8 +97,8 @@ Section
     WriteRegStr   HKLM "Software\Undo for MoM2e" "" $INSTDIR
     WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "DisplayIcon" "$INSTDIR\Undo_MoM2e.ico"
     WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "DisplayName" "Undo for FFG Games"
-    WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "DisplayVersion" "1.0"
-    WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "EstimatedSize" 16707
+    WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "DisplayVersion" "2.0"
+    WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "EstimatedSize" 16722
     WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "HelpLink" "https://github.com/gurnec/Undo_FFG/issues"
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "NoModify" 1
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Undo for MoM2e" "NoRepair" 1
