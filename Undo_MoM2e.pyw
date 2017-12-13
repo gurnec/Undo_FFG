@@ -39,8 +39,9 @@ import nrbf
 __version__ = '1.0'
 DEFAULT_MAX_UNDO_STATES = 20
 
-MOM = 'MoM2e'
-RTL = 'RtL'
+MOM  = 'MoM2e'
+RTL  = 'RtL'
+LOTA = 'LotA'
 DEFAULT_GAME = MOM
 
 
@@ -345,50 +346,88 @@ def parse_mom_savegame(savefile):
     return tiles, monsters, threat_name
 
 # Read the contents of an RtL SavedGameA file to retrieve the group name, scenario, difficulty,
-# player count, location and combat round (ignoring errors resulting from format changes).
+# player count, location, combat round, and tile count (ignoring errors resulting from format changes).
 RTL_SCENARIOS_BY_ID    = {'CAM_1':'Goblins', 'CAM_2':'Kindred Fire', 'CAM_3':'The Delve', 'CAM_4':'Nerekhall', 'CAM_5':'Frostgate'}
 RTL_DIFFICULTIES_BY_ID = {0: 'Normal', 1: 'Hard'}
 RTL_CITIES_BY_ID       = {'CITY_0':'Tamalir', 'CITY_1':'Nerekhall', 'CITY_2':'Greyhaven'}
 def parse_rtl_savedgame(savefile):
     savedata = nrbf.read_stream(savefile)
-    group = scenario = difficulty = players = location = round = ''
+    group = scenario = difficulty = players = location = round = tiles = ''
+    in_quest = False
     with ignored(AttributeError): group      = savedata.PartyName
     with ignored(AttributeError): scenario   = RTL_SCENARIOS_BY_ID   .get(savedata.CampaignId,         '')
     with ignored(AttributeError): difficulty = RTL_DIFFICULTIES_BY_ID.get(savedata.CampaignDifficulty, '')
     with ignored(AttributeError): players    = len(savedata.HeroIds)
-    location_id = None
+    with ignored(AttributeError): in_quest   = savedata.CurrentScene.value__ == 2
     with ignored(AttributeError):
         for string_var in savedata.GlobalVarData.StringVars:
-            if string_var.Name == "Campaign/CurrentLocation":
-                location_id = string_var.Value
+            if string_var.Name == 'Campaign/CurrentLocation':
+                location = string_var.Value
                 break
-    in_quest = True
-    if location_id:
-        location = RTL_CITIES_BY_ID.get(location_id)
-        if location:  # if the location is a city
-            in_quest = False
-        else:         # else the location is a quest
-            # If the quest has been completed, it's no longer active
-            with ignored(AttributeError):
-                if location_id in savedata.CampaignData.CompletedQuestIds:
-                    location = ''
-                    in_quest = False
-            if in_quest:
-                location = location_id.replace('_', ' ')
-                if location.upper().startswith('QUEST '):
-                    location = location[6:]
-                location = location.title()
     if in_quest:
+        if location and isinstance(location, str):
+            if location.upper().startswith('QUEST'):
+                location = location[5:]
+            location = location.replace('_', ' ').strip().title()
+        else:
+            location = None
+        if not location:
+            location = 'Quest'
         with ignored(AttributeError):
             for int_var in savedata.GlobalVarData.IntVars:
                 if int_var.Name == 'Round':
                     round = int_var.Value
                     break
-    return group, scenario, difficulty, players, location, round
+        tiles = 0
+        try:
+            for tile in savedata.QuestData.TileSaveData.values():
+                if tile.Visible:
+                    tiles += 1
+        except AttributeError:
+            tiles = ''
+    else:
+        location = RTL_CITIES_BY_ID.get(location, 'Wilderness')
+    return group, scenario, difficulty, players, location, round, tiles
+
+# Read the contents of a LotA SavedGameA file to retrieve the squad name, campaign, difficulty,
+# player count, combat round and tile count (ignoring errors resulting from format changes).
+LOTA_SCENARIOS_BY_ID = {'CAM_T':'Tutorial', 'CAM_1':'Freedom Fighter'}
+def parse_lota_savedgame(savefile):
+    savedata = json.load(savefile)
+    squad = campaign = difficulty = players = round = tiles = ''
+    in_quest = False
+    with ignored(KeyError): squad      = savedata['PartyName']
+    with ignored(KeyError): campaign   = LOTA_SCENARIOS_BY_ID  [savedata['CampaignId']]
+    with ignored(KeyError): difficulty = RTL_DIFFICULTIES_BY_ID[savedata['CampaignDifficulty']]  # (same as RtL)
+    with ignored(KeyError): players    = len(savedata['HeroIds'])
+    with ignored(KeyError): in_quest   = savedata['CurrentScene'] == 2
+    if campaign == 'Tutorial':
+        with ignored(KeyError):
+            # If the tutorial has started:
+            if savedata['CampaignData']['SceneData']['SceneId'] != -1 or \
+               savedata['QuestData']   ['SceneData']['SceneId'] != -1:
+                # Check to see if the tutorial has been completed:
+                for bool_var in savedata['GlobalVarData']['BoolVars']:
+                    if bool_var['Name'] == 'IsTutorial':
+                        if bool_var['Value'] is False:
+                            campaign = LOTA_SCENARIOS_BY_ID['CAM_1']
+                        break
+    if in_quest:
+        with ignored(KeyError): round = savedata['QuestData']['RoundCount']
+        if round == 0:
+            round = 1
+        tiles = 0
+        try:
+            for tile in savedata['QuestData']['SceneData']['TileSaveData']:
+                if tile['Visible']:
+                    tiles += 1
+        except KeyError:
+            tiles = ''
+    return squad, campaign, difficulty, players, round, tiles
 
 
 def init_gamespecific_globals(game):
-    assert game in (MOM, RTL)
+    assert game in (MOM, RTL, LOTA)
     global FFG_GAME
     FFG_GAME = game
 
@@ -399,14 +438,14 @@ def init_gamespecific_globals(game):
     if FFG_GAME == MOM:
         SLOT_COUNT = 0  # 0 is a flag for the special case where there's exactly one save slot
         known_undostate_hexhashes = [collections.OrderedDict()]
-    elif FFG_GAME == RTL:
+    elif FFG_GAME in (RTL, LOTA):
         SLOT_COUNT = 5
         known_undostate_hexhashes = [collections.OrderedDict() for i in range(SLOT_COUNT)]
     else: assert False
     assert len(str(SLOT_COUNT)) == 1  # a current code limitation: SLOT_COUNT must be < 10
 
     # Directory & filename constants
-    global MYDATA_DIR, SETTINGS_FILENAME, STEAM_ID, SAVEGAME_DIR, LOG_FILENAMES, STEAMAPPS_DIR
+    global MYDATA_DIR, SETTINGS_FILENAME, STEAM_ID, SAVEGAME_DIR, LOG_FILENAMES
     APPDATA_DIR = Path(os.environ['APPDATA'])
     assert APPDATA_DIR.is_dir(), 'located %APPDATA% directory'
     MYDATA_DIR        = APPDATA_DIR / 'Undo for MoM2e'
@@ -417,23 +456,10 @@ def init_gamespecific_globals(game):
         LOG_FILENAMES = [SAVEGAME_DIR / 'Log']
     elif FFG_GAME == RTL:
         STEAM_ID = 477200
-        # Look for the RtL install directory in the registry
-        import winreg
-        try:
-            with winreg.OpenKeyEx(winreg.HKEY_LOCAL_MACHINE,
-                    rf'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Steam App {STEAM_ID}',
-                    access=winreg.KEY_QUERY_VALUE | winreg.KEY_WOW64_64KEY) as regkey:
-                SAVEGAME_DIR  = Path(winreg.QueryValueEx(regkey, 'InstallLocation')[0])
-                STEAMAPPS_DIR = SAVEGAME_DIR.parent
-                SAVEGAME_DIR /= r'Road to Legend_Data\SavedGames'
-        # If the above fails or if it's not yet installed, fallback to the default install location
-        except OSError:
-            traceback.print_exc()
-            STEAMAPPS_DIR  = Path(os.getenv('ProgramFiles(x86)') or os.environ['ProgramFiles'])
-            assert STEAMAPPS_DIR.is_dir(), 'located %ProgramFiles% directory'
-            STEAMAPPS_DIR /= r'Steam\SteamApps\common'
-            SAVEGAME_DIR   = STEAMAPPS_DIR / r'Descent Road to Legend\Road to Legend_Data\SavedGames'
-        LOG_FILENAMES = [SAVEGAME_DIR / rf'{slot}\LogA.txt' for slot in range(SLOT_COUNT)]
+        init_gamedir_globals('Descent Road to Legend', r'Road to Legend_Data\SavedGames')
+    elif FFG_GAME == LOTA:
+        STEAM_ID = 703980
+        init_gamedir_globals('Imperial Assault', r'Imperial Assault_Data\SavedGames')
     else: assert False
 
     # Game-specific GUI strings
@@ -444,7 +470,30 @@ def init_gamespecific_globals(game):
     elif FFG_GAME == RTL:
         GAME_NAME_TEXT  = 'Road to Legend'
         OPEN_BUTON_TEXT = 'Open Road\nto Legend'
+    elif FFG_GAME == LOTA:
+        GAME_NAME_TEXT  = 'Legends of the Alliance'
+        OPEN_BUTON_TEXT = 'Open Legends\nof the Alliance'
     else: assert False
+
+def init_gamedir_globals(default_dir, savegame_dir):
+    global SAVEGAME_DIR, STEAMAPPS_DIR, LOG_FILENAMES
+    # Look for the install directory in the registry
+    import winreg
+    try:
+        with winreg.OpenKeyEx(winreg.HKEY_LOCAL_MACHINE,
+                rf'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Steam App {STEAM_ID}',
+                access=winreg.KEY_QUERY_VALUE | winreg.KEY_WOW64_64KEY) as regkey:
+            SAVEGAME_DIR  = Path(winreg.QueryValueEx(regkey, 'InstallLocation')[0])
+            STEAMAPPS_DIR = SAVEGAME_DIR.parent
+            SAVEGAME_DIR /= savegame_dir
+    # If the above fails or if it's not yet installed, fallback to the default install location
+    except OSError:
+        traceback.print_exc()
+        STEAMAPPS_DIR  = Path(os.getenv('ProgramFiles(x86)') or os.environ['ProgramFiles'])
+        assert STEAMAPPS_DIR.is_dir(), 'located %ProgramFiles% directory'
+        STEAMAPPS_DIR /= r'Steam\SteamApps\common'
+        SAVEGAME_DIR   = STEAMAPPS_DIR / default_dir / savegame_dir
+    LOG_FILENAMES = [SAVEGAME_DIR / rf'{slot}\LogA.txt' for slot in range(SLOT_COUNT)]
 
 # Settings (all one of them)
 settings = {}
@@ -485,7 +534,9 @@ class UndoApplication(ttk.Frame):
         if FFG_GAME == MOM:
             col_headings = 'Scenario', 'Tiles Required', 'Players', 'Round', 'Tiles', 'Monsters', 'Main Threat', 'Timestamp'
         elif FFG_GAME == RTL:
-            col_headings = 'Group', 'Scenario', 'Difficulty', 'Players', 'Quest / Location', 'Round', 'Timestamp'
+            col_headings = 'Group', 'Scenario', 'Difficulty', 'Players', 'Quest / Location', 'Round', 'Tiles', 'Timestamp'
+        elif FFG_GAME == LOTA:
+            col_headings = 'Group', 'Scenario', 'Difficulty', 'Players', 'Round', 'Tiles', 'Timestamp'
         else: assert False
         self.states_treeview = ttk.Treeview(frame,
             columns    = [c.lower() for c in col_headings] + ['current'],
@@ -504,6 +555,10 @@ class UndoApplication(ttk.Frame):
         if FFG_GAME == RTL:
             self.states_treeview.column('scenario', width=75)
             self.states_treeview.column('quest / location', width=180)
+        if FFG_GAME == LOTA:
+            self.states_treeview.heading('group',    text='Squad')
+            self.states_treeview.heading('scenario', text='Campaign')
+            self.states_treeview.column ('scenario', width=100)
         if FFG_GAME == MOM:
             self.states_treeview.column('tiles required', width=140)
             self.states_treeview.column('main threat',    width=120)
@@ -598,7 +653,7 @@ class UndoApplication(ttk.Frame):
         timestamp = app.states_treeview.set(hexhash_slot, 'timestamp')
         filename  = ''
         scenario_or_group = scenario
-        if FFG_GAME == RTL:
+        if FFG_GAME in (RTL, LOTA):
             scenario_or_group = app.states_treeview.set(hexhash_slot, 'group')
             scenario_or_group = ''.join(c if c.isalnum() or c in " -'!" else '_' for c in scenario_or_group)  # sanitize
         if scenario_or_group:
@@ -608,16 +663,17 @@ class UndoApplication(ttk.Frame):
             filename += ', '
         elif players:
             filename += f'{players} players, '
-        if FFG_GAME == RTL:
+        if FFG_GAME in (RTL, LOTA):
             if scenario:
                 filename += scenario
                 difficulty = app.states_treeview.set(hexhash_slot, 'difficulty')
                 if difficulty:
                     filename += f' ({difficulty})'
                 filename += ', '
-            location = app.states_treeview.set(hexhash_slot, 'quest / location')
-            if location:
-                filename += f'{location}, '
+            if FFG_GAME == RTL:
+                location = app.states_treeview.set(hexhash_slot, 'quest / location')
+                if location:
+                    filename += f'{location}, '
         if round:
             filename += f'round {round}, '
         filename += timestamp[:-3].replace(':', '.')
@@ -641,14 +697,19 @@ class UndoApplication(ttk.Frame):
         try:
             with ZipFile(filename) as unzipper:
                 for zipped_filename in unzipper.namelist():
-                    zipped_filename = zipped_filename.lower()
                     # If at least one of the savegame files is present, assume it's valid
-                    if FFG_GAME == MOM and zipped_filename in ('gamedata.dat', 'mom_savegame'):
-                        break
-                    elif FFG_GAME == RTL and zipped_filename.startswith('savedgame'):  # e.g. SavedGameA
-                        break
+                    if FFG_GAME == MOM and zipped_filename.lower() in ('gamedata.dat', 'mom_savegame') or \
+                       FFG_GAME in (RTL, LOTA) and zipped_filename.lower() == 'savedgamea':
+                        with unzipper.open(zipped_filename) as savefile:
+                            if FFG_GAME in (MOM, RTL):
+                                if nrbf.serialization(savefile).read_header():  # returns True if it's a valid header
+                                    break
+                            elif FFG_GAME == LOTA:
+                                if savefile.read(2) == b'{"':  # if it looks like the beginning of a json object
+                                    break
+                            else: assert False
                 else:
-                    raise BadZipFile("can't find any expected game save filename")
+                    raise BadZipFile("can't find any expected game save file")
         except BadZipFile as e:
             messagebox.showerror('Error', f'This file is not a {GAME_NAME_TEXT} Undo file.\n({e})')
             return
@@ -662,7 +723,7 @@ class UndoApplication(ttk.Frame):
             slot -= 1  # (it's zero-based)
         else:
             slot = 0
-        restore_undo_state(filename, slot, update_rtl_save_index= FFG_GAME==RTL)
+        restore_undo_state(filename, slot, update_save_index= SLOT_COUNT > 1)
         handle_new_savegame(slot)
 
     @staticmethod
@@ -746,19 +807,21 @@ def load_undo_states():
 
         # Parse the savegame files inside the zip for display purposes
         treeview_values = [None] * 4 if FFG_GAME == MOM else []  # for MoM preallocate the first 4
-        with ZipFile(zip_filename) as zipper:
-            for zipped_filename in zipper.namelist():
+        with ZipFile(zip_filename) as unzipper:
+            for zipped_filename in unzipper.namelist():
                 if FFG_GAME == MOM:
                     if zipped_filename.lower() == 'gamedata.dat':
-                        with zipper.open(zipped_filename) as savefile:
+                        with unzipper.open(zipped_filename) as savefile:
                             treeview_values[:4] = parse_mom_gamedata(savefile)
                     elif zipped_filename.lower() == 'mom_savegame':
-                        with zipper.open(zipped_filename) as savefile:
+                        with unzipper.open(zipped_filename) as savefile:
                             treeview_values.extend(parse_mom_savegame(savefile))
-                elif FFG_GAME == RTL:
+                elif FFG_GAME in (RTL, LOTA):
                     if zipped_filename.lower() == 'savedgamea':
-                        with zipper.open(zipped_filename) as savefile:
-                            treeview_values = parse_rtl_savedgame(savefile)
+                        with unzipper.open(zipped_filename) as savefile:
+                            treeview_values = parse_rtl_savedgame (savefile) if FFG_GAME == RTL \
+                                         else parse_lota_savedgame(savefile)
+                else: assert False
 
         # Insert the Undo State into the treeview UI at the top
         hexhash_slot = f'{hexhash}-{slot}'
@@ -855,11 +918,13 @@ def handle_new_savegame(slot, use_filetime = False):
                     main_savename = f
                     with f.open('rb') as savefile:
                         treeview_values.extend(parse_mom_savegame(savefile))
-            elif FFG_GAME == RTL:
+            elif FFG_GAME in (RTL, LOTA):
                 if lower_name == 'savedgamea':
                     main_savename = f
                     with f.open('rb') as savefile:
-                        treeview_values = parse_rtl_savedgame(savefile)
+                        treeview_values = parse_rtl_savedgame (savefile) if FFG_GAME == RTL \
+                                     else parse_lota_savedgame(savefile)
+            else: assert False
     zipper.close()
     binhash = hash.digest()
 
@@ -949,14 +1014,14 @@ def handle_restore_clicked():
     app.states_treeview.set(hexhash_slot, 'current', CURRENT_ARROW)  # set the 'current' column
     app.states_treeview.item(hexhash_slot, tags=('current_tag',))    # and add the highlighting tag
 
-def restore_undo_state(zip_filename, slot, update_rtl_save_index = False):
+def restore_undo_state(zip_filename, slot, update_save_index = False):
     if SLOT_COUNT:
         assert 0 <= slot < SLOT_COUNT
         savegame_dir = SAVEGAME_DIR / str(slot)
     else:
         assert slot == 0
+        assert not update_save_index
         savegame_dir = SAVEGAME_DIR
-    assert not update_rtl_save_index or FFG_GAME == RTL  # this arg is only supported for RTL
     global watcher_skip_next
     extracted_filenames = []
     try:
@@ -969,15 +1034,29 @@ def restore_undo_state(zip_filename, slot, update_rtl_save_index = False):
                     unzipper.extract(zipped_filename, savegame_dir)
                     extracted_filenames.append(zipped_filename)
 
-        # For RtL, the SaveIndex (what the UI calls the save slot) is stored
-        # inside the SavedGameA file, so if it's different it must be updated
-        if update_rtl_save_index:
-            savegame_filename = savegame_dir / 'SavedGameA'
-            with savegame_filename.open('r+b') as savefile:
-                save_ser = nrbf.serialization(savefile, can_overwrite_member=True)
-                savedata = save_ser.read_stream()
-                if slot != savedata.SaveIndex:
-                    save_ser.overwrite_member(savedata, 'SaveIndex', slot)
+        # For RtL and LotA, the SaveIndex (what the UI calls the save slot) is
+        # stored inside the SavedGameA file, so if it's different it must be updated
+        if update_save_index:
+            savegame_filenames = [ savegame_dir / 'SavedGameA', savegame_dir / 'SavedGameB' ]
+            if not savegame_filenames[-1].is_file():
+                savegame_filenames.pop()  # the second savegame file isn't always present
+            if FFG_GAME == RTL:
+                for savegame_filename in savegame_filenames:
+                    with savegame_filename.open('r+b') as savefile:
+                        save_ser = nrbf.serialization(savefile, can_overwrite_member=True)
+                        savedata = save_ser.read_stream()
+                        if slot != savedata.SaveIndex:
+                            save_ser.overwrite_member(savedata, 'SaveIndex', slot)
+            elif FFG_GAME == LOTA:
+                for savegame_filename in savegame_filenames:
+                    with savegame_filename.open('r+', encoding='utf-8') as savefile:
+                        savedata = json.load(savefile)
+                        if slot != savedata['SaveIndex']:
+                            savedata['SaveIndex'] = slot
+                            savefile.seek(0)
+                            savefile.truncate()
+                            # Write it back out using the same JSON formatting
+                            json.dump(savedata, savefile, ensure_ascii=False, separators=(',', ':'))
 
     except Exception:
         # Undo any file extractions if there were any errors
@@ -1024,7 +1103,7 @@ def main(game):
         root.config(cursor='wait')
         root.update()
 
-        if FFG_GAME == RTL and not STEAMAPPS_DIR.is_dir():
+        if FFG_GAME in (RTL, LOTA) and not STEAMAPPS_DIR.is_dir():
             raise RuntimeError(f"Undo can't find either the {GAME_NAME_TEXT} nor the SteamApps folder")
         if not SAVEGAME_DIR.is_dir():
             answered_yes = messagebox.askyesno("Can't find SaveGame folder",
@@ -1093,10 +1172,12 @@ if __name__ == '__main__':
                 game = MOM
             elif game_arg == 'rtl':
                 game = RTL
+            elif game_arg == 'lota':
+                game = LOTA
             else:
-                sys.exit(f'Unsupported game, must be one of: mom, rtl')
+                sys.exit(f'Unsupported game, must be one of: mom, rtl, lota')
         else:
-            sys.exit(f'Usage: {sys.argv[0]} [--game=mom|rtl]')
+            sys.exit(f'Usage: {sys.argv[0]} [--game=mom|rtl|lota]')
     else:
         game = DEFAULT_GAME
     try:

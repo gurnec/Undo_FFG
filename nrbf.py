@@ -287,7 +287,7 @@ class serialization:
         return self._read_members_into(Class(), object_id, Class._primitive_types.get)
 
     # If primitive_type is not None, read the specified primitive_type with one of the
-    # PrimitiveType_readers. Otherwise read the next RecordType in the filestream with
+    # PrimitiveType_readers. Otherwise read the next RecordType in the streamfile with
     # one of the RecordType_readers. If overwrite_info is not None, add overwrite info
     # (a tuple containing: file position, struct type) to overwrite_info[overwrite_index]
     # if the value read is an overwritable primitive. Finally, returns the value read.
@@ -506,11 +506,27 @@ class serialization:
         return self._MessageEnd()
 
 
+    def read_header(self):
+        '''Reads just the SerializationHeaderRecord from the streamfile.
+        It's not necessary to call this, however it may be called before read_stream() if desired.
+        Otherwise, read_stream() will raise an exception if the SerializationHeaderRecord isn't found.
+
+        :return: True if the streamfile is in a supported .NET Remoting Binary Format
+        '''
+        assert self._root_id is None, 'read_header() has not already been called'
+        try:
+            self._read_Record_or_Primitive(primitive_type=False)
+        except Exception:
+            return False
+        return self._root_id is not None
+
     def read_stream(self):
         '''Read the streamfile in .NET Remoting Binary Format and extract its root object
 
         :return: the root object contained in the stream
         '''
+        if self._root_id is None and not self.read_header():
+            raise RuntimeError('SerializationHeaderRecord not found (probably not an NRBF file)')
         obj = None
         while not isinstance(obj, self._MessageEnd):
             obj = self._read_Record_or_Primitive(primitive_type=False)
@@ -712,5 +728,7 @@ if __name__ == '__main__':
         sys.exit(f'Usage: {sys.argv[0]} streamfile')
     streamfile = open(sys.argv[1], 'rb')
     json_encoder = JSONEncoder(indent=4)
-    while len(streamfile.peek(1)) > 0:
+    while True:
         print(json_encoder.encode(read_stream(streamfile)))
+        if streamfile.peek(1) == b'':
+            break

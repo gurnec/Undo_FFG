@@ -86,9 +86,10 @@ Section
     ; Install the Start Menu shortcuts
     !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
         CreateDirectory "$SMPROGRAMS\$StartMenuFolder"
-        CreateShortcut  "$SMPROGRAMS\$StartMenuFolder\Undo for Mansions of Madness.lnk" "$INSTDIR\Undo_MoM2e.exe" "--game=mom"
-        CreateShortcut  "$SMPROGRAMS\$StartMenuFolder\Undo for Road to Legend.lnk"      "$INSTDIR\Undo_MoM2e.exe" "--game=rtl"
-        CreateShortcut  "$SMPROGRAMS\$StartMenuFolder\Uninstall Undo for FFG.lnk"       "$INSTDIR\Uninstall.exe"
+        CreateShortcut  "$SMPROGRAMS\$StartMenuFolder\Undo for Mansions of Madness.lnk"     "$INSTDIR\Undo_MoM2e.exe" "--game=mom"
+        CreateShortcut  "$SMPROGRAMS\$StartMenuFolder\Undo for Road to Legend.lnk"          "$INSTDIR\Undo_MoM2e.exe" "--game=rtl"
+        CreateShortcut  "$SMPROGRAMS\$StartMenuFolder\Undo for Legends of the Alliance.lnk" "$INSTDIR\Undo_MoM2e.exe" "--game=lota"
+        CreateShortcut  "$SMPROGRAMS\$StartMenuFolder\Uninstall Undo for FFG.lnk"           "$INSTDIR\Uninstall.exe"
     !insertmacro MUI_STARTMENU_WRITE_END
 
     ; Install the uninstaller
@@ -139,6 +140,7 @@ Section "Uninstall"
     !insertmacro MUI_STARTMENU_GETFOLDER Application $StartMenuFolder
     Delete /REBOOTOK "$SMPROGRAMS\$StartMenuFolder\Undo for Mansions of Madness.lnk"
     Delete /REBOOTOK "$SMPROGRAMS\$StartMenuFolder\Undo for Road to Legend.lnk"
+    Delete /REBOOTOK "$SMPROGRAMS\$StartMenuFolder\Undo for Legends of the Alliance.lnk"
     Delete /REBOOTOK "$SMPROGRAMS\$StartMenuFolder\Uninstall Undo for FFG.lnk"
     RMDir  /REBOOTOK "$SMPROGRAMS\$StartMenuFolder"
 
