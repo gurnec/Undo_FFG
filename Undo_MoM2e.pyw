@@ -259,7 +259,7 @@ MOM_VARIANT_TO_REQDTILES = {
     'What Lies Within 04A'          : 'Flask, Moon, Tentacle',
     'Dearly Departed 01A'           : 'Key, Tentacle',
     'Dearly Departed 01B'           : 'Key, Tentacle',
-    'Dearly Departed 02A'           : 'Key, Moon, Tentacle',
+    'Dearly Departed 02A'           : 'Key, Tentacle',
     'Dearly Departed 03A'           : 'Key, Flask, Moon',
     'Cult of Sentinel Hill 01A'     : 'Moon',
     'Cult of Sentinel Hill 01B'     : 'Moon',
