@@ -1073,9 +1073,11 @@ def restore_undo_state(zip_filename, slot, update_save_index = False):
 def restore_window_listener(pipe):
     while True:
         pipe.accept().close()
-        root.deiconify()
-        root.attributes('-topmost', 1)  # root.lift() doesn't work on modern
-        root.attributes('-topmost', 0)  # versions of Windows, but this does
+        root.event_generate('<<restore_window>>')
+def handle_restore_window(event):
+    root.deiconify()
+    root.attributes('-topmost', 1)  # root.lift() doesn't work on modern
+    root.attributes('-topmost', 0)  # versions of Windows, but this does
 
 root = app = None
 def main(game):
@@ -1102,6 +1104,7 @@ def main(game):
         app  = UndoApplication(root)
         root.config(cursor='wait')
         root.update()
+        assert root.getvar('tcl_platform(threaded)'), 'tcl has multithreading support'
 
         if FFG_GAME in (RTL, LOTA) and not STEAMAPPS_DIR.is_dir():
             raise RuntimeError(f"Undo can't find either the {GAME_NAME_TEXT} nor the SteamApps folder")
@@ -1132,6 +1135,7 @@ def main(game):
         watcher_thread = threading.Thread(target=watch_directory, args=(savegame_dirs, send_new_savegame_event), daemon=True)
         watcher_thread.start()
 
+        root.bind('<<restore_window>>', handle_restore_window)
         restore_window_thread = threading.Thread(target=restore_window_listener, args=(exclusive_pipe,), daemon=True)
         restore_window_thread.start()
 
