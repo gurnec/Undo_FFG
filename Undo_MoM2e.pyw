@@ -572,6 +572,12 @@ class UndoApplication(ttk.Frame):
         self.states_treeview.focus_set()
         self.master.bind('<Alt_L><u>', lambda e: self.states_treeview.focus_set())
         self.master.bind('<Alt_R><u>', lambda e: self.states_treeview.focus_set())
+        def handle_right_pressed(event):
+            selected = event.widget.selection()
+            if not selected or not event.widget.get_children(selected[0]) or event.widget.item(selected[0], 'open'):
+                self.last_focused_button.focus_set()
+                return 'break'
+        self.states_treeview.bind('<Right>', handle_right_pressed)
 
         # Don't know why, but if an item inside the treeview isn't given focus,
         # one can't use tab alone (w/o a mouse) to give focus to the treeview
@@ -582,45 +588,55 @@ class UndoApplication(ttk.Frame):
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.states_treeview.config(yscrollcommand=scrollbar.set)
 
+        buttons = []
+        def handle_up_pressed(event):
+            buttons[buttons.index(event.widget) - 1].focus_set()
+        def handle_down_pressed(event):
+            buttons[buttons.index(event.widget) + 1].focus_set()
+        def handle_left_pressed(event):
+            self.last_focused_button = event.widget
+            self.states_treeview.focus_set()
+        def config_button(button, shortcut, button_side = None):
+            button.bind('<Up>',   handle_up_pressed)
+            button.bind('<Down>', handle_down_pressed)
+            button.bind('<Left>', handle_left_pressed)
+            button.pack(fill=tk.X, pady=6, side=button_side)
+            invoke = lambda event: button.invoke()
+            self.master.bind(f'<Alt_L><{shortcut}>', invoke)
+            self.master.bind(f'<Alt_R><{shortcut}>', invoke)
+            buttons.append(button)
+
         # Frame for Button widgets
         frame = ttk.Frame()
         frame.pack(side=tk.LEFT, fill=tk.Y, pady=30)
-
         ttk.Style().configure('TButton', justify='center')
-        button_pady = 6
 
         # This is the only button whose command isn't a member function
         # (just to group the savegame-related code together down below)
         self.restore_button = ttk.Button(frame, text='Restore selected\nUndo State',
             command=handle_restore_clicked, underline=0, state=tk.DISABLED)
-        self.restore_button.pack(fill=tk.X, pady=button_pady)
-        self.master.bind('<Alt_L><r>', lambda e: self.restore_button.invoke())
-        self.master.bind('<Alt_R><r>', lambda e: self.restore_button.invoke())
+        config_button(self.restore_button, 'r')
+        self.restore_button.unbind('<Up>')  # the topmost button
 
         self.save_as_button = ttk.Button(frame, text='Save selected\nUndo State as...',
             command=self.handle_save_as_clicked, underline=0, state=tk.DISABLED)
-        self.save_as_button.pack(fill=tk.X, pady=button_pady)
-        self.master.bind('<Alt_L><s>', lambda e: self.save_as_button.invoke())
-        self.master.bind('<Alt_R><s>', lambda e: self.save_as_button.invoke())
+        config_button(self.save_as_button, 's')
 
         restore_from_button = ttk.Button(frame, text='Restore saved\nUndo State from...',
             command=self.handle_restore_from_clicked, underline=25)
-        restore_from_button.pack(fill=tk.X, pady=button_pady)
-        self.master.bind('<Alt_L><f>', lambda e: restore_from_button.invoke())
-        self.master.bind('<Alt_R><f>', lambda e: restore_from_button.invoke())
+        config_button(restore_from_button, 'f')
 
         settings_button = ttk.Button(frame, text='Settings...',
             command=self.handle_settings_clicked, underline=2)
-        settings_button.pack(side=tk.BOTTOM, fill=tk.X, pady=button_pady)
-        self.master.bind('<Alt_L><t>', lambda e: settings_button.invoke())
-        self.master.bind('<Alt_R><t>', lambda e: settings_button.invoke())
+        config_button(settings_button, 't', tk.BOTTOM)
+        settings_button.unbind('<Down>')  # the bottommost button
 
         open_game_button = ttk.Button(frame, text=OPEN_BUTON_TEXT,
             command=self.handle_open_game_clicked, underline=0)
-        open_game_button.pack(side=tk.BOTTOM, fill=tk.X, pady=button_pady)  # gets placed *above* the settings button,
-        open_game_button.lower(settings_button)                             # so move its tab-stop before settings too
-        self.master.bind('<Alt_L><o>', lambda e: open_game_button.invoke())
-        self.master.bind('<Alt_R><o>', lambda e: open_game_button.invoke())
+        config_button(open_game_button, 'o', tk.BOTTOM)  # gets placed *above* the settings button,
+        open_game_button.lower(settings_button)          # so move its tab-stop before settings and
+        buttons.insert(-1, buttons.pop())                # also its position in the buttons list
+        self.last_focused_button = open_game_button
 
         ttk.Sizegrip().pack(side=tk.BOTTOM)
 
@@ -684,12 +700,11 @@ class UndoApplication(ttk.Frame):
             src_filename = next(MYDATA_DIR.glob(glob_pattern))  # next() gets the first (should be the only) filename
             shutil.copyfile(src_filename, filename)
 
-    @classmethod
-    def handle_restore_from_clicked(cls):
+    def handle_restore_from_clicked(self):
         if is_game_running():
             return
-        cls.init_filedialog()
-        filename = filedialog.askopenfilename(title='Restore Undo State from', **cls.FILEDIALOG_ARGS)
+        self.init_filedialog()
+        filename = filedialog.askopenfilename(title='Restore Undo State from', **self.FILEDIALOG_ARGS)
         if not filename or is_game_running():
             return
 
@@ -717,7 +732,7 @@ class UndoApplication(ttk.Frame):
         if SLOT_COUNT:
             slot = simpledialog.askinteger('Slot?', '\nWhich Save Slot would you like this\n'
                                                      f'Undo State to be restored into (1-{SLOT_COUNT}) ?\n',
-                                           minvalue=1, maxvalue=SLOT_COUNT)
+                                           parent=self, minvalue=1, maxvalue=SLOT_COUNT)
             if not slot or is_game_running():
                 return
             slot -= 1  # (it's zero-based)
@@ -732,11 +747,10 @@ class UndoApplication(ttk.Frame):
         os.startfile(f'steam://run/{STEAM_ID}')  # see https://developer.valvesoftware.com/wiki/Steam_browser_protocol
         root.config(cursor='')
 
-    @staticmethod
-    def handle_settings_clicked():
+    def handle_settings_clicked(self):
         new_max_undo_states = simpledialog.askinteger('Settings',
             '\nMaximum Undo States ' + ('(per Save Slot) :\n' if SLOT_COUNT else ':\n'),
-            initialvalue=settings[MAX_UNDO_STATES], minvalue=2, maxvalue=1_000)
+            parent=self, initialvalue=settings[MAX_UNDO_STATES], minvalue=2, maxvalue=1_000)
         if new_max_undo_states and new_max_undo_states != settings[MAX_UNDO_STATES]:
             to_be_deleted = 0
             for hexhashes in known_undostate_hexhashes:
