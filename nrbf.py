@@ -560,9 +560,9 @@ class serialization:
         replacement    = {}
         overwrite_info = {} if self._add_overwrite_info else None
         for item in orig_obj.KeyValuePairs:
-            # If any key is a _Reference, it must be resolved first
-            # (value _References will be resolved later)
             try:
+                # If any key is a _Reference, it must be resolved first
+                # (value _References will be resolved later)
                 if isinstance(item.key, self._Reference):
                     self._resolve_simple_reference(item.key)
                 assert item.key not in replacement
@@ -614,7 +614,7 @@ class serialization:
         '''Overwrite an object's member with a new value in the streamfile (does not change obj).
 
         :param obj: an object in the hierarchy returned by read_stream()
-        :param member: an writable member (attribute) name, index (for lists/arrays), or key (for dicts) in obj
+        :param member: a writable member (attribute) name, index (for lists/arrays), or key (for dicts) in obj
         :param value: the new value to be written to the streamfile
         '''
         assert self._add_overwrite_info, 'serialization object must have been constructed with can_overwrite_member == True'
@@ -631,9 +631,9 @@ class serialization:
         finally:
             self._file.seek(old_pos)
 
-    def is_member_writable(self, obj, member, value):
+    def is_member_writable(self, obj, member):
         '''Returns True if the object's member can be overwritten.
-        Raises an exception if the member doesn't exist.
+        Can (but isn't guaranteed to) raise an exception if the member doesn't exist.
 
         :param obj: an object in the hierarchy returned by read_stream()
         :param member: a member (attribute) name, index (for lists/arrays), or key (for dicts) in obj

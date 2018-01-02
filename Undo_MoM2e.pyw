@@ -1048,8 +1048,8 @@ def restore_undo_state(zip_filename, slot, update_save_index = False):
                     unzipper.extract(zipped_filename, savegame_dir)
                     extracted_filenames.append(zipped_filename)
 
-        # For RtL and LotA, the SaveIndex (what the UI calls the save slot) is
-        # stored inside the SavedGameA file, so if it's different it must be updated
+        # For RtL and LotA, the SaveIndex (what the UI calls the save slot) is stored
+        # inside the SavedGameA/B files, so if it's different it must be updated
         if update_save_index:
             savegame_filenames = [ savegame_dir / 'SavedGameA', savegame_dir / 'SavedGameB' ]
             if not savegame_filenames[-1].is_file():
