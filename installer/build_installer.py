@@ -55,7 +55,7 @@ os.chdir('installer')
 run((str(makensis), 'Undo_MoM2e.nsi'), check=True)
 
 if cert_name:
-    filename_to_sign = 'Undo_v2.0_for_FFG_setup.exe',
+    filename_to_sign = 'Undo_v2.1_for_FFG_setup.exe',
     run(sign_args_sha1   + filename_to_sign, check=True)
     run(sign_args_sha256 + filename_to_sign, check=True)
 

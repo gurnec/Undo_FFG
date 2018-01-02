@@ -36,7 +36,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, filedialog
 import nrbf
 
-__version__ = '2.0.1'
+__version__ = '2.1'
 DEFAULT_MAX_UNDO_STATES = 20
 
 MOM  = 'MoM2e'
