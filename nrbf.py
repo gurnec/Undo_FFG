@@ -302,7 +302,7 @@ class serialization:
             record_type = self._file.read(1)
             # If overwrite_info is not None and record_type == MemberPrimitiveTyped, parse it ourselves--
             # read in the PrimitiveTypeEnum and call ourselves to finish parsing and add the overwrite_info
-            if overwrite_info is not None and record_type == '\x08':
+            if overwrite_info is not None and record_type == b'\x08':
                 return self._read_Record_or_Primitive(self._file.read(1), overwrite_info, overwrite_index)
             return self._RecordType_readers[record_type](self)
 
