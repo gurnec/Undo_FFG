@@ -694,8 +694,9 @@ class JSONEncoder(json.JSONEncoder):
 
 
 # Returns a version of the identifier suitable to pass to namedlist
+_identifier_re = re.compile('[^a-z0-9_]', flags=re.IGNORECASE)
 def sanitize_identifier(identifier):
-    identifier = re.sub('[^a-z0-9_]', '_', identifier, flags=re.IGNORECASE).lstrip('0123456789_')
+    identifier = _identifier_re.sub('_', identifier).lstrip('0123456789_')
     if not identifier:
         return 'invalid_identifier'
     if iskeyword(identifier):
@@ -709,8 +710,7 @@ def make_unique(name, unique_set):
         for append in itertools.count(2):
             replacement = name + str(append)
             if replacement not in unique_set:
-                break
-        return replacement
+                return replacement
     return name
 
 # Pre-allocates a "multidimensional array", i.e. a list of lists of Nones
@@ -726,9 +726,9 @@ def multidimensional_array(lengths):
 if __name__ == '__main__':
     if len(sys.argv) != 2:
         sys.exit(f'Usage: {sys.argv[0]} streamfile')
-    streamfile = open(sys.argv[1], 'rb')
     json_encoder = JSONEncoder(indent=4)
-    while True:
-        print(json_encoder.encode(read_stream(streamfile)))
-        if streamfile.peek(1) == b'':
-            break
+    with open(sys.argv[1], 'rb') as streamfile:
+        while True:
+            print(json_encoder.encode(read_stream(streamfile)))
+            if streamfile.peek(1) == b'':
+                break

@@ -67,14 +67,14 @@ def returned_false(result, func, arguments):
 # Watch the specified directories for any file changes, and call the callback once they've been completed.
 # If a specified directory doesn't exist but its *immediate* parent does, the callback is called if the
 # directory is later created, but only after one or more files are also created inside it. This works
-# works correctly for multiple such nonexistent directories if and only if they share the same parent.
+# correctly for multiple such nonexistent directories if and only if they share the same parent.
 watcher_skip_next = False  # if True and the next change takes 0.5s or less to finish, it is skipped
 def watch_directory(directories, callback):
+    assert callable(callback)
     handles = FindCloseChangeNotification = None  # used in the finally suite below
     try:
         if not hasattr(directories, '__len__'):
             directories = directories,
-        assert callable(callback)
 
         # Load the Windows API functions and constants we need
         t = ctypes.wintypes
@@ -180,12 +180,8 @@ def watch_directory(directories, callback):
         raise
     finally:
         if handles and FindCloseChangeNotification:
-            for handle in handles:
-                if handle is not None:
-                    try:
-                        FindCloseChangeNotification(handle)
-                    except WindowsError:
-                        pass
+            for handle in filter(None, handles):
+                with ignored(WindowsError): FindCloseChangeNotification(handle)
 
 
 # Loads the CreateFile Windows API function and some constants we need
