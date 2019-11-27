@@ -52,6 +52,11 @@ Section
     SetOutPath "$INSTDIR"
     SetShellVarContext all
 
+    ; Remove files from older versions which aren't overwritten by this version
+    Delete /REBOOTOK "$INSTDIR\python36.dll"
+    Delete /REBOOTOK "$INSTDIR\unicodedata.pyd"
+    SetRebootFlag false
+
     ; Install the Visual Studio redistributable
     GetTempFileName $0
     File /oname=$0 VC_redist.x86.exe
@@ -127,9 +132,10 @@ Section "Uninstall"
     Delete   /REBOOTOK "$INSTDIR\Uninstall.exe"
     Delete   /REBOOTOK "$INSTDIR\Undo_MoM2e.ico"
     Delete   /REBOOTOK "$INSTDIR\LICENSE.txt"
-    Delete   /REBOOTOK "$INSTDIR\python36.dll"
+    Delete   /REBOOTOK "$INSTDIR\python38.dll"
     Delete   /REBOOTOK "$INSTDIR\tcl86t.dll"
     Delete   /REBOOTOK "$INSTDIR\tk86t.dll"
+    Delete   /REBOOTOK "$INSTDIR\libffi-7.dll"
     Delete   /REBOOTOK "$INSTDIR\VCRUNTIME140.dll"
     Delete   /REBOOTOK "$INSTDIR\base_library.zip"
     Delete   /REBOOTOK "$INSTDIR\*.pyd"

@@ -32,15 +32,20 @@ print('Building venv ...')
 working_dir = working_dir.parent
 os.chdir(working_dir)
 venv.EnvBuilder(upgrade=True, with_pip=True).create(r'build\venv')
-working_dir /= r'build\venv\Scripts'
+scripts_dir = working_dir / r'build\venv\Scripts'
 
 print()
-run([working_dir/"pip"] + 'install --upgrade --upgrade-strategy eager '
+run([scripts_dir/'pip'] + 'install --upgrade --upgrade-strategy eager '
     'https://github.com/pyinstaller/pyinstaller/archive/develop.zip'.split(), check=True)
 
 print()
-run([working_dir/"pyinstaller"] + '--windowed --add-binary Undo_MoM2e.ico;. -i Undo_MoM2e.ico '
+run([scripts_dir/'pyinstaller'] + '--windowed --add-binary Undo_MoM2e.ico;. -i Undo_MoM2e.ico '
     r'--version-file installer\file_version_info.txt --noconfirm Undo_MoM2e.pyw'.split(), check=True)
+
+working_dir /= r'dist\Undo_MoM2e'
+working_dir.joinpath('libcrypto-1_1.dll').unlink()
+working_dir.joinpath('libssl-1_1.dll').unlink()
+working_dir.joinpath('unicodedata.pyd').unlink()
 
 if cert_name:
     print()
