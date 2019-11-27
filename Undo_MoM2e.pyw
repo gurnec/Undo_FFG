@@ -366,9 +366,10 @@ def parse_mom_savegame(savefile):
 
 # Read the contents of an RtL SavedGameA file to retrieve the group name, scenario, difficulty,
 # player count, location, combat round, and tile count (ignoring errors resulting from format changes).
-RTL_SCENARIOS_BY_ID    = {'CAM_1':'Goblins', 'CAM_2':'Kindred Fire', 'CAM_3':'The Delve', 'CAM_4':'Nerekhall', 'CAM_5':'Frostgate'}
+RTL_SCENARIOS_BY_ID    = {'CAM_1':'Rise of all Goblins', 'CAM_2':'Kindred Fire', 'CAM_3':'The Delve',
+                          'CAM_4':'Nerekhall', 'CAM_5':'Trials of Frostgate', 'CAM_6':'Embers of Dread'}
 RTL_DIFFICULTIES_BY_ID = {0: 'Normal', 1: 'Hard'}
-RTL_CITIES_BY_ID       = {'CITY_0':'Tamalir', 'CITY_1':'Nerekhall', 'CITY_2':'Greyhaven'}
+RTL_CITIES_BY_ID       = {'CITY_0':'Tamalir', 'CITY_1':'Nerekhall', 'CITY_2':'Greyhaven', 'CITY_4':'Riverwatch'}
 def parse_rtl_savedgame(savefile):
     savedata = nrbf.read_stream(savefile)
     group = scenario = difficulty = players = location = round = tiles = ''
@@ -384,6 +385,8 @@ def parse_rtl_savedgame(savefile):
                 location = string_var.Value
                 break
     if in_quest:
+        if not location:
+            with suppress(AttributeError): location = savedata.CurrentQuestId
         if location and isinstance(location, str):
             if location.upper().startswith('QUEST'):
                 location = location[5:]
@@ -578,7 +581,7 @@ class UndoApplication(ttk.Frame):
                 self.states_treeview.column(col.lower(), anchor=tk.CENTER, width=60)
         self.states_treeview.column('#1', anchor=tk.E, width=160)  # Scenario for MoM, Group for RtL
         if FFG_GAME == RTL:
-            self.states_treeview.column('scenario', width=75)
+            self.states_treeview.column('scenario', width=110)
             self.states_treeview.column('quest / location', width=180)
         if FFG_GAME == LOTA:
             self.states_treeview.heading('group',    text='Squad')
