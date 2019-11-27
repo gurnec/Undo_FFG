@@ -1,11 +1,11 @@
-#!python3.6-32
+#!python3.8-32
 
-import sys, os, winreg
-from subprocess import run, PIPE
+import sys, os, winreg, venv
+from subprocess import run, DEVNULL
 from pathlib import Path
 
 if len(sys.argv) == 3 and sys.argv[1] == '--sign':
-    run(('signtool', '/?'), stderr=PIPE, check=True)  # verify that signtool is in the path
+    run(('signtool', '/?'), stderr=DEVNULL, check=True)  # verify that signtool is in the path
     cert_name = sys.argv[2]
 elif len(sys.argv) > 1:
     sys.exit(f'Usage: {Path(sys.argv[0]).name} [--sign CERTIFICATE-NAME]')
@@ -14,7 +14,8 @@ else:
     import atexit, msvcrt
     atexit.register(lambda: (print('\nPress any key to exit ...', end='', flush=True), msvcrt.getch()))
 
-vc_redist = Path(__file__).parent / 'vc_redist.x86.exe'
+working_dir = Path(__file__).parent
+vc_redist = working_dir / 'VC_redist.x86.exe'
 assert vc_redist.is_file()
 
 try:
@@ -27,22 +28,22 @@ except OSError:
     makensis = Path(program_files) / r'NSIS\makensis.exe'
 assert makensis.is_file()
 
-output = run(('py', '-3.6-32', '-c', 'import sys; sys.stdout.buffer.write(sys.executable.encode("utf-8"))'),
-             stdout=PIPE, encoding='utf-8', check=True)
-scripts = Path(output.stdout).parent / r'Scripts'
+print('Building venv ...')
+working_dir = working_dir.parent
+os.chdir(working_dir)
+venv.EnvBuilder(upgrade=True, with_pip=True).create(r'build\venv')
+working_dir /= r'build\venv\Scripts'
 
-run((str(scripts / 'pip3.6'), 'install', '--upgrade', '--upgrade-strategy', 'only-if-needed', 'pyinstaller'), check=True)
+print()
+run([working_dir/"pip"] + 'install --upgrade --upgrade-strategy eager '
+    'https://github.com/pyinstaller/pyinstaller/archive/develop.zip'.split(), check=True)
 
-os.chdir('..')
-run((str(scripts / 'pyinstaller'),
-     '--windowed',
-     '--add-data', 'Undo_MoM2e.ico;.',
-     '-i', 'Undo_MoM2e.ico',
-     '--version-file', r'installer\file_version_info.txt',
-     'Undo_MoM2e.pyw'),
-     check=True)
+print()
+run([working_dir/"pyinstaller"] + '--windowed --add-binary Undo_MoM2e.ico;. -i Undo_MoM2e.ico '
+    r'--version-file installer\file_version_info.txt --noconfirm Undo_MoM2e.pyw'.split(), check=True)
 
 if cert_name:
+    print()
     sign_args_sha1   = 'signtool', 'sign', '/v' , '/n', cert_name
     sign_args_sha256 = sign_args_sha1[:]
     sign_args_sha1   += '/t', 'http://timestamp.verisign.com/scripts/timstamp.dll'
@@ -51,10 +52,12 @@ if cert_name:
     run(sign_args_sha1   + filename_to_sign, check=True)
     run(sign_args_sha256 + filename_to_sign, check=True)
 
+print()
 os.chdir('installer')
-run((str(makensis), 'Undo_MoM2e.nsi'), check=True)
+run((makensis, 'Undo_MoM2e.nsi'), check=True)
 
 if cert_name:
+    print()
     filename_to_sign = 'Undo_v2.1_for_FFG_setup.exe',
     run(sign_args_sha1   + filename_to_sign, check=True)
     run(sign_args_sha256 + filename_to_sign, check=True)
