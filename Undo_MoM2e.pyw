@@ -410,7 +410,8 @@ def parse_rtl_savedgame(savefile):
 
 # Read the contents of a LotA SavedGameA file to retrieve the squad name, campaign, difficulty,
 # player count, combat round and tile count (ignoring errors resulting from format changes).
-LOTA_SCENARIOS_BY_ID = {'CAM_T':'Tutorial', 'CAM_1':'Freedom Fighter'}
+LOTA_SCENARIOS_BY_ID = {'CAM_T':'Tutorial', 'CAM_1':'Freedom Fighter', 'CAM_2':"Jabba's Realm", 'CAM_3':'Return to Hoth',
+                        'RAID_1':'Malastarian Outpost', 'RAID_2':'Gray Cap Cantina'}
 def parse_lota_savedgame(savefile):
     savedata = json.load(savefile)
     squad = campaign = difficulty = players = round = tiles = ''
@@ -582,7 +583,7 @@ class UndoApplication(ttk.Frame):
         if FFG_GAME == LOTA:
             self.states_treeview.heading('group',    text='Squad')
             self.states_treeview.heading('scenario', text='Campaign')
-            self.states_treeview.column ('scenario', width=100)
+            self.states_treeview.column ('scenario', width=120)
         if FFG_GAME == MOM:
             self.states_treeview.column('tiles required', width=140)
             self.states_treeview.column('main threat',    width=120)

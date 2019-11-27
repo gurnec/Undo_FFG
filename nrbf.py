@@ -487,9 +487,9 @@ class serialization:
         major_version = self._read_Int32()
         minor_version = self._read_Int32()
         if major_version != 1:
-            raise NotImplementedError('SerializationHeaderRecord.MajorVersion == {major_version}')
+            raise NotImplementedError(f'SerializationHeaderRecord.MajorVersion == {major_version}')
         if minor_version != 0:
-            raise NotImplementedError('SerializationHeaderRecord.MinorVersion == {minor_version}')
+            raise NotImplementedError(f'SerializationHeaderRecord.MinorVersion == {minor_version}')
         if self._root_id == 0:
             raise NotImplementedError('SerializationHeaderRecord.RootId == 0')
 
@@ -706,12 +706,12 @@ def sanitize_identifier(identifier):
 
 # Returns a version of the name which isn't present in the unique_set
 def make_unique(name, unique_set):
-    if name in unique_set:
-        for append in itertools.count(2):
-            replacement = name + str(append)
-            if replacement not in unique_set:
-                return replacement
-    return name
+    if name not in unique_set:
+        return name
+    for append in itertools.count(2):
+        replacement = name + str(append)
+        if replacement not in unique_set:
+            return replacement
 
 # Pre-allocates a "multidimensional array", i.e. a list of lists of Nones
 def multidimensional_array(lengths):
