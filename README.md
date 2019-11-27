@@ -31,7 +31,7 @@ Visit the [releases page](https://github.com/gurnec/Undo_FFG/releases/latest), a
 
 If you'd prefer to run Undo for FFG Games from the Python source code directly:
 
- 1. Visit the Python download page here: <https://www.python.org/downloads/windows/>, and click the link for the latest **Python 3.6** release. Download and run either the `Windows x86 web-based installer` for the 32-bit version of Python, or the `Windows x86-64 web-based installer` for the 64-bit one. Modern PCs can use the 64-bit version, however if you're unsure which one is compatible with your PC, choose the 32-bit one.
+ 1. Visit the Python download page here: <https://www.python.org/downloads/windows/>, and click the link for the latest **Python 3.8** release. Download and run either the `Windows x86 web-based installer` for the 32-bit version of Python, or the `Windows x86-64 web-based installer` for the 64-bit one. Modern PCs can use the 64-bit version, however if you're unsure which one is compatible with your PC, choose the 32-bit one.
 
  2. Download the latest version of Undo for FFG Games from <https://github.com/gurnec/Undo_FFG/archive/master.zip> and unzip it to a location of your choice.
  

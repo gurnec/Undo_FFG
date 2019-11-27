@@ -45,6 +45,7 @@ import abc as _abc
 
 _PY2 = _sys.version_info[0] == 2
 _PY3 = _sys.version_info[0] == 3
+_PY38 = _PY3 and _sys.version_info[1] >= 8
 
 try:
     _OrderedDict = _collections.OrderedDict
@@ -159,21 +160,27 @@ class _NameChecker(object):
 def _make_fn(name, chain_fn, args, defaults):
     args_with_self = ['_self'] + list(args)
     arguments = [_ast.Name(id=arg, ctx=_ast.Load()) for arg in args_with_self]
-    defs = [_ast.Name(id='_def{0}'.format(idx), ctx=_ast.Load()) for idx, _ in enumerate(defaults)]
+    parameters = {}
+    parameters['defaults'] = [_ast.Name(id='_def{0}'.format(idx), ctx=_ast.Load()) for idx, _ in enumerate(defaults)]
     if _PY2:
-        parameters = _ast.arguments(args=[_ast.Name(id=arg, ctx=_ast.Param()) for arg in args_with_self],
-                                    defaults=defs)
+        parameters['args'] = [_ast.Name(id=arg, ctx=_ast.Param()) for arg in args_with_self]
     else:
-        parameters = _ast.arguments(args=[_ast.arg(arg=arg) for arg in args_with_self],
-                                    kwonlyargs=[],
-                                    defaults=defs,
-                                    kw_defaults=[])
-    module_node = _ast.Module(body=[_ast.FunctionDef(name=name,
-                                                     args=parameters,
-                                                     body=[_ast.Return(value=_ast.Call(func=_ast.Name(id='_chain', ctx=_ast.Load()),
-                                                                                       args=arguments,
-                                                                                       keywords=[]))],
-                                                     decorator_list=[])])
+        parameters['args'] = [_ast.arg(arg=arg) for arg in args_with_self]
+        parameters['kwonlyargs']  = []
+        parameters['kw_defaults'] = []
+        if _PY38:
+            parameters['posonlyargs'] = []
+    function_def = _ast.FunctionDef(name=name,
+                                    args=_ast.arguments(**parameters),
+                                    body=[_ast.Return(value=_ast.Call(func=_ast.Name(id='_chain', ctx=_ast.Load()),
+                                                                      args=arguments,
+                                                                      keywords=[]))],
+                                    decorator_list=[])
+    if _PY38:
+        module_node = _ast.Module(body=[function_def],
+                                  type_ignores=[])
+    else:
+        module_node = _ast.Module(body=[function_def])
     module_node = _ast.fix_missing_locations(module_node)
 
     # compile the ast

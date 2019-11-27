@@ -1,4 +1,4 @@
-#!python3.6
+#!python3.8
 # Undo_MoM2e.py - Undo for Fantasy Flight Games apps
 # Copyright (C) 2017 Christopher Gurnee
 # All rights reserved.
@@ -27,8 +27,9 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-import threading, io, hashlib, collections, json, shutil, contextlib, \
+import threading, io, hashlib, collections, json, shutil, \
        ctypes, ctypes.wintypes, sys, os, time, traceback
+from contextlib import suppress
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED, BadZipFile
 from multiprocessing.connection import Listener, Client
@@ -181,7 +182,7 @@ def watch_directory(directories, callback):
     finally:
         if handles and FindCloseChangeNotification:
             for handle in filter(None, handles):
-                with ignored(WindowsError): FindCloseChangeNotification(handle)
+                with suppress(WindowsError): FindCloseChangeNotification(handle)
 
 
 # Loads the CreateFile Windows API function and some constants we need
@@ -221,13 +222,6 @@ def can_open_exclusively(filepath):
     CloseHandle(handle)
     return True
 
-
-# Ignores the specified exception(s) inside a with statement, e.g.:
-#   with ignored(AttributeError): obj.non_existant_attrib()  # won't raise
-@contextlib.contextmanager
-def ignored(*exceptions):
-    try: yield
-    except exceptions: pass
 
 # Read the contents of a MoM GameData.dat file to retrieve the scenario name, the list of required
 # tile types, a player count, and round number (ignoring errors resulting from format changes)
@@ -278,14 +272,14 @@ MOM_VARIANT_TO_REQDTILES = {
 def parse_mom_gamedata(savefile):
     savedata = nrbf.read_stream(savefile)
     scenario = reqdtiles = players = round = ''
-    with ignored(AttributeError):
+    with suppress(AttributeError):
         scenario  = savedata.VariantName
         reqdtiles = MOM_VARIANT_TO_REQDTILES.get(scenario)
         if scenario[-3:-2] == '0':
             scenario = scenario[:-4]
     # InvestigatorIds is a comma-separated string; count its values:
-    with ignored(AttributeError): players = savedata.InvestigatorIds.count(',') + 1
-    with ignored(AttributeError): round   = savedata.Round
+    with suppress(AttributeError): players = savedata.InvestigatorIds.count(',') + 1
+    with suppress(AttributeError): round   = savedata.Round
     return scenario, reqdtiles, players, round
 
 # Read the contents of a MoM_SaveGame file to retrieve the tile count, monster count,
@@ -350,12 +344,12 @@ def parse_rtl_savedgame(savefile):
     savedata = nrbf.read_stream(savefile)
     group = scenario = difficulty = players = location = round = tiles = ''
     in_quest = False
-    with ignored(AttributeError): group      = savedata.PartyName
-    with ignored(AttributeError): scenario   = RTL_SCENARIOS_BY_ID   .get(savedata.CampaignId,         '')
-    with ignored(AttributeError): difficulty = RTL_DIFFICULTIES_BY_ID.get(savedata.CampaignDifficulty, '')
-    with ignored(AttributeError): players    = len(savedata.HeroIds)
-    with ignored(AttributeError): in_quest   = savedata.CurrentScene.value__ == 2
-    with ignored(AttributeError):
+    with suppress(AttributeError): group      = savedata.PartyName
+    with suppress(AttributeError): scenario   = RTL_SCENARIOS_BY_ID   .get(savedata.CampaignId,         '')
+    with suppress(AttributeError): difficulty = RTL_DIFFICULTIES_BY_ID.get(savedata.CampaignDifficulty, '')
+    with suppress(AttributeError): players    = len(savedata.HeroIds)
+    with suppress(AttributeError): in_quest   = savedata.CurrentScene.value__ == 2
+    with suppress(AttributeError):
         for string_var in savedata.GlobalVarData.StringVars:
             if string_var.Name == 'Campaign/CurrentLocation':
                 location = string_var.Value
@@ -369,7 +363,7 @@ def parse_rtl_savedgame(savefile):
             location = None
         if not location:
             location = 'Quest'
-        with ignored(AttributeError):
+        with suppress(AttributeError):
             for int_var in savedata.GlobalVarData.IntVars:
                 if int_var.Name == 'Round':
                     round = int_var.Value
@@ -392,13 +386,13 @@ def parse_lota_savedgame(savefile):
     savedata = json.load(savefile)
     squad = campaign = difficulty = players = round = tiles = ''
     in_quest = False
-    with ignored(KeyError): squad      = savedata['PartyName']
-    with ignored(KeyError): campaign   = LOTA_SCENARIOS_BY_ID  [savedata['CampaignId']]
-    with ignored(KeyError): difficulty = RTL_DIFFICULTIES_BY_ID[savedata['CampaignDifficulty']]  # (same as RtL)
-    with ignored(KeyError): players    = len(savedata['HeroIds'])
-    with ignored(KeyError): in_quest   = savedata['CurrentScene'] == 2
+    with suppress(KeyError): squad      = savedata['PartyName']
+    with suppress(KeyError): campaign   = LOTA_SCENARIOS_BY_ID  [savedata['CampaignId']]
+    with suppress(KeyError): difficulty = RTL_DIFFICULTIES_BY_ID[savedata['CampaignDifficulty']]  # (same as RtL)
+    with suppress(KeyError): players    = len(savedata['HeroIds'])
+    with suppress(KeyError): in_quest   = savedata['CurrentScene'] == 2
     if campaign == 'Tutorial':
-        with ignored(KeyError):
+        with suppress(KeyError):
             # If the tutorial has started:
             if savedata['CampaignData']['SceneData']['SceneId'] != -1 or \
                savedata['QuestData']   ['SceneData']['SceneId'] != -1:
@@ -409,7 +403,7 @@ def parse_lota_savedgame(savefile):
                             campaign = LOTA_SCENARIOS_BY_ID['CAM_1']
                         break
     if in_quest:
-        with ignored(KeyError): round = savedata['QuestData']['RoundCount']
+        with suppress(KeyError): round = savedata['QuestData']['RoundCount']
         if round == 0:
             round = 1
         tiles = 0
@@ -527,6 +521,11 @@ class UndoApplication(ttk.Frame):
 
         ttk.Label(frame, text='Undo States', underline=0).pack(padx=3, pady=3, anchor=tk.W)
 
+        # Workaround for TreeView color bug in Tk 8.6.9, see https://core.tcl-lang.org/tk/info/509cafafae
+        treeview_style = ttk.Style()
+        treeview_style.map("Treeview", background=
+            [e for e in treeview_style.map("Treeview", query_opt="background") if e[:2] != ("!disabled", "!selected")])
+
         if FFG_GAME == MOM:
             col_headings = 'Scenario', 'Tiles Required', 'Players', 'Round', 'Tiles', 'Monsters', 'Main Threat', 'Timestamp'
         elif FFG_GAME == RTL:
@@ -637,8 +636,7 @@ class UndoApplication(ttk.Frame):
         ttk.Sizegrip().pack(side=tk.BOTTOM)
 
     def handle_state_selected(self, event):
-        selected = event.widget.selection()
-        if selected:
+        if selected := event.widget.selection():
             assert len(selected) == 1
             new_state = tk.DISABLED if selected[0].startswith('slot') else tk.NORMAL
         else:
@@ -678,13 +676,11 @@ class UndoApplication(ttk.Frame):
         if FFG_GAME in (RTL, LOTA):
             if scenario:
                 filename += scenario
-                difficulty = app.states_treeview.set(hexhash_slot, 'difficulty')
-                if difficulty:
+                if difficulty := app.states_treeview.set(hexhash_slot, 'difficulty'):
                     filename += f' ({difficulty})'
                 filename += ', '
             if FFG_GAME == RTL:
-                location = app.states_treeview.set(hexhash_slot, 'quest / location')
-                if location:
+                if location := app.states_treeview.set(hexhash_slot, 'quest / location'):
                     filename += f'{location}, '
         if round:
             filename += f'round {round}, '
@@ -956,7 +952,7 @@ def handle_new_savegame(slot, use_filetime = False):
     else:
         save_time = None
         if use_filetime and main_savename:
-            with ignored(OSError): save_time = main_savename.stat().st_mtime
+            with suppress(OSError): save_time = main_savename.stat().st_mtime
         save_time    = time.localtime(save_time)  # converts from file time to struct_time, or if None gets cur time
         timstamp_str = time.strftime('%Y-%m-%d %H:%M:%S', save_time)  # e.g. '2017-11-08 19:01:27'
         zip_filename = MYDATA_DIR / f'{FFG_GAME} {timstamp_str.replace(":", ".")} {hexhash_slot}.zip'

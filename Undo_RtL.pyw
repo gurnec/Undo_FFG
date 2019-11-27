@@ -1,4 +1,4 @@
-#!python3.6
+#!python3.8
 # Undo_RtL.py - stub for Undo for Descent 2nd ed. Road to Legend
 # Copyright (C) 2017 Christopher Gurnee
 # All rights reserved.

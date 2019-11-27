@@ -1,4 +1,4 @@
-# nrbf.py - .NET Remoting Binary Format reading library for Python 3.6
+# nrbf.py - .NET Remoting Binary Format reading library for Python 3.6+
 # Copyright (C) 2017 Christopher Gurnee
 # All rights reserved.
 #

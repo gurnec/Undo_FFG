@@ -1,4 +1,4 @@
-#!python3.6
+#!python3.8
 # Undo_LotA.py - stub for Undo for Imperial Assault Legends of the Alliance
 # Copyright (C) 2017 Christopher Gurnee
 # All rights reserved.

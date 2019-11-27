@@ -54,7 +54,7 @@ Section
 
     ; Install the Visual Studio redistributable
     GetTempFileName $0
-    File /oname=$0 vc_redist.x86.exe
+    File /oname=$0 VC_redist.x86.exe
     ExecWait '"$0" /quiet /norestart' $1
     ${If} $1 == 1638
         ; Installation stopped because a newer version is already installed
