@@ -6,8 +6,8 @@ VSVersionInfo(
   ffi=FixedFileInfo(
     # filevers and prodvers should be always a tuple with four items: (1, 2, 3, 4)
     # Set not needed items to zero 0.
-    filevers=(2, 1, 0, 0),
-    prodvers=(2, 1, 0, 0),
+    filevers=(3, 0, 0, 0),
+    prodvers=(3, 0, 0, 0),
     # Contains a bitmask that specifies the valid bits 'flags'r
     mask=0x3f,
     # Contains a bitmask that specifies the Boolean attributes of the file.
@@ -30,8 +30,8 @@ VSVersionInfo(
       StringTable(
         u'040904b0',
         [StringStruct(u'FileDescription', u'Undo for FFG Games'),
-        StringStruct(u'FileVersion', u'2.1.0.0'),
-        StringStruct(u'LegalCopyright', u'Copyright © 2017 Christopher Gurnee. All rights reserved.'),
+        StringStruct(u'FileVersion', u'3.0.0.0'),
+        StringStruct(u'LegalCopyright', u'Copyright © 2017-2019 Christopher Gurnee. All rights reserved.'),
         StringStruct(u'OriginalFilename', u'Undo_MoM2e.exe')])
       ]), 
     VarFileInfo([VarStruct(u'Translation', [1033, 1200])])

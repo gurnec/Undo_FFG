@@ -35,7 +35,7 @@ If you'd prefer to run Undo for FFG Games from the Python source code directly:
 
  2. Download the latest version of Undo for FFG Games from <https://github.com/gurnec/Undo_FFG/archive/master.zip> and unzip it to a location of your choice.
  
- 3. In the folder you unzipped above, double-click the `Undo_MoM2e.pyw` file for Mansions of Madness, `Undo_RtL.pyw` for Road to Legend, or `Undo_LotA.pyw` for Legends of the Alliance. 
+ 3. In the folder you unzipped above, double-click the `Undo_MoM2e.pyw` file for Mansions of Madness, `Undo_RtL.pyw` for Road to Legend, `Undo_LotA.pyw` for Legends of the Alliance, or `Undo_JiME.pyw` for Journeys in Middle-Earth.
 
 
 ## Q & A ##
