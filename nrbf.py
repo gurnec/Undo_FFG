@@ -70,13 +70,13 @@ class serialization:
         self._add_overwrite_info     = can_overwrite_member
         self._overwrite_info_by_pyid = {}   # if above is True, overwrite_info objs indexed by python id()
 
-    # Below are a set of "readers" and other support types, one per defined structure
-    # in revision 11.0 of the ".NET Remoting: Binary Format Data Structure" specification
+    # Below are a set of "readers" and other support types, one per defined structure in
+    # revisions 10.0-12.0 of the ".NET Remoting: Binary Format Data Structure" specification
     # in approximately the same order of each structure's definition. Each one reads in
     # the structure's elements, and depending on the reader type may return some or all
     # of the read values. This first section implements the Primitive Types, each one
-    # returning the closest Python analogous type to the Primitive Type read.
-    ######## Reference: https://msdn.microsoft.com/en-us/library/cc236844.aspx ########
+    # returning the closest Python analogous type to the .NET Primitive Type read.
+    ######## Reference: https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-nrbf ########
 
     # A dict of all PrimitiveType readers indexed by a length-one PrimitiveTypeEnumeration bytes object
     _PrimitiveType_readers = {}
@@ -89,7 +89,7 @@ class serialization:
             try:
                 return utf8_bytes.decode('utf-8')
             except UnicodeDecodeError:
-                if len(utf8_bytes) > 4:
+                if len(utf8_bytes) >= 4:
                     raise
 
     @_register_reader(_PrimitiveType_readers, 12)
@@ -224,8 +224,8 @@ class serialization:
 
     ######## Classes ########
 
-    # Reads a ClassInfo structure, and if the Class's ObjectId hasn't yet been seen, adds to
-    # self._Class_by_id a new Python class with the same members as the ClassInfo specifies.
+    # Reads a ClassInfo structure, creates a new Python class with the members specified by the
+    # ClassInfo, adds it to self._Class_by_id indexed by the ObjectId, and returns the class.
     def _read_ClassInfo(self):
         object_id    = self._read_Int32()
         class_name   = self._read_LengthPrefixedString()
