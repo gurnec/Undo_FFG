@@ -585,7 +585,10 @@ class serialization:
         # If items is itself a _Reference, it must be resolved first
         if isinstance(orig_obj.items, self._Reference):
             self._resolve_simple_reference(orig_obj.items)
-        replacement = orig_obj.items
+            replacement = orig_obj.items[:orig_obj.size]  # because it's a reference, we must copy the array
+        else:
+            replacement = orig_obj.items
+            del replacement[orig_obj.size:]  # because it's not a reference, we can modify the array in-place
         # If any list element is a _Reference, fix its parent
         for element in replacement:
             if isinstance(element, self._Reference):
