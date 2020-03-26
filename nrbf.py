@@ -1,5 +1,5 @@
 # nrbf.py - .NET Remoting Binary Format reading library for Python 3.6+
-# Copyright (C) 2017 Christopher Gurnee
+# Copyright (C) 2017, 2020 Christopher Gurnee
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -35,6 +35,7 @@ from datetime    import datetime, timedelta, timezone
 from decimal     import Decimal
 from keyword     import iskeyword
 from struct      import Struct, calcsize, pack
+from contextlib  import suppress
 from namedlist   import namedlist
 
 
@@ -61,18 +62,19 @@ class serialization:
         if can_overwrite_member:
             assert streamfile.writable()
             assert streamfile.seekable()
-        self._file                  = streamfile
-        self._Class_by_id           = {}    # see _read_ClassInfo()
-        self._objects_by_id         = {}    # all referenceable objects indexed by ObjectId
-        self._root_id               = None  # the id of the single root object
-        self._member_references     = []    # all seen simple references, see _read_MemberReference()
-        self._collection_references = []    # all seen collection references, e.g. .NET dicts and lists
-        self._add_overwrite_info    = can_overwrite_member
+        self._file               = streamfile
+        self._Class_by_id        = {}    # see _read_ClassInfo()
+        self._objects_by_id      = {}    # all referenceable objects indexed by ObjectId
+        self._root_id            = None  # the id of the single root object
+        self._member_references  = []    # all seen NRBF MemberReferences, see _read_MemberReference()
+        self._collection_infos   = []    # _CollectionInfo for each seen .NET collection
+        self._add_overwrite_info = can_overwrite_member
         # If can_overwrite_member is True, the below is a dict indexed by an object's python id();
         # each value contains multiple _OverwriteInfo objects, and has the same layout as the object
         self._overwrite_infos_by_pyid = {} if can_overwrite_member else None
 
-    _OverwriteInfo = namedtuple('_OverwriteInfo', 'pos format')  # file.tell() and struct format string
+    _CollectionInfo = namedtuple('_CollectionInfo', 'obj id')      # original collection object and ObjectId
+    _OverwriteInfo  = namedtuple('_OverwriteInfo',  'pos format')  # file.tell() and struct format string
 
     # Below are a set of "readers" and other support types, one per defined structure in
     # revisions 10.0-12.0 of the ".NET Remoting: Binary Format Data Structure" specification
@@ -108,17 +110,13 @@ class serialization:
         if ticks >= 1 << 61:    # if negative, reinterpret
             ticks -= 1 << 62    # as 62-bit two's complement
         time = datetime(1, 1, 1)
-        try:
+        with suppress(OverflowError):
             time += timedelta(microseconds= ticks / 10)
-        except OverflowError:
-            pass
         if kind == 1:
             time = time.replace(tzinfo=timezone.utc)
         elif kind == 2:
-            try:
+            with suppress(OSError):
                 time = time.astimezone()  # kind 2 is the local time zone
-            except OSError:
-                pass
         return time
 
     @_register_reader(_PrimitiveType_readers, 18)
@@ -173,23 +171,23 @@ class serialization:
         self._read_LengthPrefixedString()  # TypeName
         self._read_Int32()                 # LibraryId
 
-    @enum.unique
-    class _MessageFlags(enum.Flag):
-        NoArgs                 = 0x00000001
-        ArgsInline             = 0x00000002
-        ArgsIsArray            = 0x00000004
-        ArgsInArray            = 0x00000008
-        NoContext              = 0x00000010
-        ContextInline          = 0x00000020
-        ContextInArray         = 0x00000040
-        MethodSignatureInArray = 0x00000080
-        PropertiesInArray      = 0x00000100
-        NoReturnValue          = 0x00000200
-        ReturnValueVoid        = 0x00000400
-        ReturnValueInline      = 0x00000800
-        ReturnValueInArray     = 0x00001000
-        ExceptionInArray       = 0x00002000
-        GenericMethod          = 0x00008000
+    # @enum.unique
+    # class _MessageFlags(enum.Flag):
+    #     NoArgs                 = 0x00000001
+    #     ArgsInline             = 0x00000002
+    #     ArgsIsArray            = 0x00000004
+    #     ArgsInArray            = 0x00000008
+    #     NoContext              = 0x00000010
+    #     ContextInline          = 0x00000020
+    #     ContextInArray         = 0x00000040
+    #     MethodSignatureInArray = 0x00000080
+    #     PropertiesInArray      = 0x00000100
+    #     NoReturnValue          = 0x00000200
+    #     ReturnValueVoid        = 0x00000400
+    #     ReturnValueInline      = 0x00000800
+    #     ReturnValueInArray     = 0x00001000
+    #     ExceptionInArray       = 0x00002000
+    #     GenericMethod          = 0x00008000
 
     def _read_ValueWithCode(self):
         return self._PrimitiveType_readers[self._file.read(1)](self)
@@ -229,7 +227,7 @@ class serialization:
     ######## Classes ########
 
     # Reads a ClassInfo structure, creates a new Python class with the members specified by the
-    # ClassInfo, adds it to self._Class_by_id indexed by the ObjectId, and returns the class.
+    # ClassInfo, adds it to self._Class_by_id indexed by the ObjectId, and returns the class and id.
     def _read_ClassInfo(self):
         object_id    = self._read_Int32()
         class_name   = self._read_LengthPrefixedString()
@@ -241,11 +239,17 @@ class serialization:
             unique_members.add(member_name)
             member_names[member_num] = member_name
         Class = namedlist(sanitize_identifier(class_name), member_names, default=None)
-        Class._id = object_id
         Class._primitive_types = {}  # filled in below by _read_MemberTypeInfo()
-        Class._is_system_class = False
+        # Check to see if there is a converter method which can convert this type from a .NET
+        # Collection (e.g. an ArrayList or Generic.List) to a native python type, and store it.
+        if class_name.startswith(f'System.Collections.'):
+            short_name = class_name[19:].split('`', 1)[0]  # strip 'System.Collections.' and any type params after backtick
+            short_name = short_name.replace('.', '_').lower()  # e.g. 'arraylist' or 'generic_list'
+            converter = getattr(self, f'_convert_{short_name}', None)
+            if callable(converter):
+                Class._convert_collection = converter
         self._Class_by_id[object_id] = Class
-        return Class
+        return Class, object_id
 
     # Readers for the AdditionalInfos member of MemberTypeInfo indexed by
     # BinaryTypeEnumeration ints; created after this class is fully defined
@@ -260,29 +264,27 @@ class serialization:
 
     @_register_reader(_RecordType_readers, 5)
     def _read_ClassWithMembersAndTypes(self):
-        Class = self._read_ClassInfo()
+        Class, object_id = self._read_ClassInfo()
         self._read_MemberTypeInfo(Class)
         self._read_Int32()  # LibraryId is ignored
-        return self._read_members_into(Class(), Class._id, Class._primitive_types.get)
+        return self._read_members_into(Class(), object_id, Class._primitive_types.get)
 
     @_register_reader(_RecordType_readers, 3)
     def _read_ClassWithMembers(self):
-        Class = self._read_ClassInfo()
+        Class, object_id = self._read_ClassInfo()
         self._read_Int32()  # LibraryId is ignored
-        return self._read_members_into(Class(), Class._id, Class._primitive_types.get)
+        return self._read_members_into(Class(), object_id, Class._primitive_types.get)
 
     @_register_reader(_RecordType_readers, 4)
     def _read_SystemClassWithMembersAndTypes(self):
-        Class = self._read_ClassInfo()
-        Class._is_system_class = True
+        Class, object_id = self._read_ClassInfo()
         self._read_MemberTypeInfo(Class)
-        return self._read_members_into(Class(), Class._id, Class._primitive_types.get)
+        return self._read_members_into(Class(), object_id, Class._primitive_types.get)
 
     @_register_reader(_RecordType_readers, 2)
     def _read_SystemClassWithMembers(self):
-        Class = self._read_ClassInfo()
-        Class._is_system_class = True
-        return self._read_members_into(Class(), Class._id, Class._primitive_types.get)
+        Class, object_id = self._read_ClassInfo()
+        return self._read_members_into(Class(), object_id, Class._primitive_types.get)
 
     @_register_reader(_RecordType_readers, 1)
     def _read_ClassWithId(self):
@@ -310,14 +312,14 @@ class serialization:
                 return self._read_Record_or_Primitive(self._file.read(1), overwrite_infos, overwrite_index)
             return self._RecordType_readers[record_type](self)
 
-    _Reference = namedlist('_Reference',  # see _read_MemberReference()
-        'id parent index_in_parent resolved collection_resolver orig_obj', default=None)
+    # Represents an NRBF MemberReference, see _read_MemberReference()
+    _MemberReference = namedlist('_MemberReference', 'id parent index_in_parent resolved', default=None)
 
     # Reads members or array elements into the 'obj' pre-allocated list or class instance
     def _read_members_into(self, obj, object_id, members_primitive_type):
         assert callable(members_primitive_type)  # when called with the member_num, returns any respective primitive type
         if self._add_overwrite_info:
-            # create the object which will store the _OverwriteInfo objects for each overwritable member in obj
+            # create the object which will store the _OverwriteInfo objects for each overwritable member in 'obj'
             overwrite_infos = [None] * len(obj) if isinstance(obj, list) else obj.__class__()
         else:
             overwrite_infos = None
@@ -330,23 +332,18 @@ class serialization:
             if isinstance(val, self._ObjectNullMultiple):  # represents one or more empty members
                 member_num += val.count
                 continue
-            if isinstance(val, self._Reference):      # see _read_MemberReference()
+            if isinstance(val, self._MemberReference):     # see _read_MemberReference()
                 val.parent          = obj
                 val.index_in_parent = member_num
             obj[member_num] = val
             member_num += 1
         if overwrite_infos is not None:
             self._overwrite_infos_by_pyid[id(obj)] = overwrite_infos
-        # If this object is a .NET collection (e.g. a Generic dict or list) which can be
-        # replaced by a native Python type, insert a collection _Reference instead of the raw
-        # object which will be resolved later in read_stream() using a "collection resolver"
-        if getattr(obj.__class__, '_is_system_class', False):
-            for collection_name, resolver in self._collection_resolvers:
-                if obj.__class__.__name__.startswith(f'System_Collections_Generic_{collection_name}_'):
-                    obj = self._Reference(object_id, collection_resolver=resolver, orig_obj=obj)
-                    self._collection_references.append(obj)
-                    break
-        self._objects_by_id[object_id] = obj
+        # Convertible collections are added to _objects_by_id after their conversion in read_stream()
+        if hasattr(obj.__class__, '_convert_collection'):
+            self._collection_infos.append(self._CollectionInfo(obj, object_id))
+        else:
+            self._objects_by_id[object_id] = obj
         return obj
 
 
@@ -402,7 +399,7 @@ class serialization:
                     if isinstance(val, self._ObjectNullMultiple):  # represents one or more empty elements
                         skip = val.count - 1  # counts this iteration which we're skipping right now
                         continue
-                    if isinstance(val, self._Reference):       # see _read_MemberReference()
+                    if isinstance(val, self._MemberReference):     # see _read_MemberReference()
                         list_indexes = ''.join(f'[{i}]' for i in indexes[:-1])
                         val.parent          = eval(f'array{list_indexes}')  # the parent list, i.e. all but the last index
                         val.index_in_parent = indexes[-1]                   # the last index
@@ -449,16 +446,16 @@ class serialization:
 
     _read_MemberPrimitiveTyped = _register_reader(_RecordType_readers, 8)(_read_ValueWithCode)
 
-    # Wherever an ObjectId is encountered above, it's added to the self._objects_by_id map
-    # along with the newly-created object. A MemberReference contains an IdRef which refers
-    # to an object in this map, however because MemberReferences can appear before the object
-    # to which they refer, they can't be resolved until the very end. Instead, a _Reference
+    # Wherever an ObjectId is encountered above, it's added to the self._objects_by_id dict
+    # along with the newly-created object. A MemberReference contains an IdRef which refers to
+    # an object in this dict, however because MemberReferences can appear before the object to
+    # which they refer, they can't be resolved until the very end. Instead, a _MemberReference
     # Python object is temporarily created which stores enough information (its parent and
     # its index inside the parent) to eventually replace it with the actual object referenced
     # once all of the objects have been read from the stream in read_stream().
     @_register_reader(_RecordType_readers, 9)
     def _read_MemberReference(self):
-        member_ref = self._Reference(self._read_Int32())  # IdRef
+        member_ref = self._MemberReference(self._read_Int32())  # IdRef
         self._member_references.append(member_ref)  # (parent and index_in_parent should be set by the caller)
         return member_ref
 
@@ -533,18 +530,22 @@ class serialization:
             obj = self._read_Record_or_Primitive(primitive_type=False)
         self._Class_by_id.clear()
 
-        # Resolve all the collection references
-        for reference in self._collection_references:
-            replacement = reference.collection_resolver(self, reference)  # calls one of the non-simple resolvers below
-            # The final steps common to all collection resolvers are completed below
-            if reference.parent:
-                reference.parent[reference.index_in_parent] = replacement
-            self._objects_by_id[reference.id] = replacement
-        self._collection_references.clear()
-
-        # Resolve all the (remaining) simple member references
+        # Resolve MemberReferences, ignoring failures (refs to convertible collections can't yet be resolved)
         for reference in self._member_references:
-            self._resolve_simple_reference(reference)
+            self._resolve_reference(reference, ignore_unresolvable=True)
+
+        # Convert collections to native Python types, and add them to _objects_by_id so they can be referenced
+        # (references to non-collections must already have been resolved as done just above)
+        for collection_info in self._collection_infos:
+            collection = collection_info.obj
+            converted  = collection.__class__._convert_collection(collection)  # calls one of the converters below
+            self._objects_by_id[collection_info.id] = converted
+        self._collection_infos.clear()
+
+        # Resolve all the remaining member references (formerly pointing to collections)
+        for reference in self._member_references:
+            if not reference.resolved:
+                self._resolve_reference(reference)
         self._member_references.clear()
 
         obj = self._objects_by_id[self._root_id]
@@ -552,66 +553,85 @@ class serialization:
         self._root_id = None
         return obj
 
-    # Convert a _Reference representing a .NET dictionary collection into a Python dict
-    def _resolve_dict_reference(self, dict_ref):
-        orig_obj = dict_ref.orig_obj
-        # If KeyValuePairs is itself a _Reference, it must be resolved first
-        if isinstance(orig_obj.KeyValuePairs, self._Reference):
-            self._resolve_simple_reference(orig_obj.KeyValuePairs)
-        replacement     = {}
-        overwrite_infos = {} if self._add_overwrite_info else None
-        for item in orig_obj.KeyValuePairs:
+    # Convert a .NET Collections.Generic.HashSet into a Python set
+    @staticmethod
+    def _convert_generic_hashset(collection):
+        converted = set()
+        for item in collection.Elements:
             try:
-                # If any key is a _Reference, it must be resolved first
-                # (value _References will be resolved later)
-                if isinstance(item.key, self._Reference):
-                    self._resolve_simple_reference(item.key)
-                assert item.key not in replacement
-                replacement[item.key] = item.value
+                assert item not in converted
+                converted.add(item)
+            except (AssertionError, TypeError):  # not all .NET HashSets can be converted to Python sets;
+                return collection                # if the conversion fails, just proceed w/the original object
+        return converted
+
+    # Do the work of _convert_hashtable() and _convert_generic_dictionary()
+    # converting a .NET key-value Collection into a Python dict
+    def _do_convertto_dict(self, collection, collection_iter):
+        converted       = {}
+        overwrite_infos = {} if self._add_overwrite_info else None
+        for key, value, values_overwrite_info in collection_iter(collection):
+            try:
+                assert key not in converted
+                converted[key] = value
                 if overwrite_infos is not None:
-                    overwrite_infos[item.key] = self._overwrite_infos_by_pyid[id(item)].value
-            except (AssertionError, TypeError):  # not all .NET dictionaries can be converted to Python dicts;
-                replacement = orig_obj           # if the conversion fails, just proceed w/the original object
-                break
-        else:
-            # If any dict value is a _Reference, fix its parent and index_in_parent
-            for key, value in replacement.items():
-                if isinstance(value, self._Reference):
-                    value.parent          = replacement
-                    value.index_in_parent = key
-            if overwrite_infos is not None:
-                self._overwrite_infos_by_pyid[id(replacement)] = overwrite_infos
-        return replacement
+                    overwrite_infos[key] = values_overwrite_info
+            except (AssertionError, TypeError):  # not all .NET key-value Collections can be converted to Python dicts;
+                return collection                # if the conversion fails, just proceed w/the original object
+        # If any dict value is a _MemberReference, fix its parent and index_in_parent
+        for key, value in converted.items():
+            if isinstance(value, self._MemberReference):
+                value.parent          = converted
+                value.index_in_parent = key
+        if overwrite_infos is not None:
+            self._overwrite_infos_by_pyid[id(converted)] = overwrite_infos
+        return converted
 
-    # Convert a _Reference representing a .NET list collection into a Python list
-    def _resolve_list_reference(self, list_ref):
-        orig_obj = list_ref.orig_obj
-        # If items is itself a _Reference, it must be resolved first
-        if isinstance(orig_obj.items, self._Reference):
-            self._resolve_simple_reference(orig_obj.items)
-            replacement = orig_obj.items[:orig_obj.size]  # because it's a reference, we must copy the array
-        else:
-            replacement = orig_obj.items
-            del replacement[orig_obj.size:]  # because it's not a reference, we can modify the array in-place
-        # If any list element is a _Reference, fix its parent
-        for element in replacement:
-            if isinstance(element, self._Reference):
-                element.parent = replacement  # (the index_in_parent remains the same)
-        return replacement
+    # Convert a .NET Collections.HashTable into a Python dict
+    def _convert_hashtable(self, collection):
+        return self._do_convertto_dict(collection, self._hashtable_iter)
+    #
+    # Iterate over each key, value, and value's _OverwriteInfo in a .NET Collections.HashTable
+    def _hashtable_iter(self, collection):
+        len_values = len(collection.Values)
+        for i, key in enumerate(collection.Keys):
+            if i < len_values:
+                yield key, collection.Values[i], \
+                      self._overwrite_infos_by_pyid[id(collection.Values)][i] if self._add_overwrite_info else None
+            else:
+                yield key, None, None
 
-    _collection_resolvers = (
-        ('Dictionary', _resolve_dict_reference),
-        ('List',       _resolve_list_reference)
-    )
+    # Convert a .NET Collections.Generic.Dictionary into a Python dict
+    def _convert_generic_dictionary(self, collection):
+        return self._do_convertto_dict(collection, self._generic_dictionary_iter)
+    #
+    # Iterate over each key, value, and _OverwriteInfo in a .NET Collections.Generic.Dictionary
+    def _generic_dictionary_iter(self, collection):
+        for item in collection.KeyValuePairs:
+            yield item.key, item.value, \
+                  self._overwrite_infos_by_pyid[id(item)].value if self._add_overwrite_info else None
 
-    # Convert a _Reference representing a MemberReference into its referenced object
-    def _resolve_simple_reference(self, member_ref):
-        assert not member_ref.collection_resolver
-        if member_ref.resolved:
-            return
-        replacement = self._objects_by_id[member_ref.id]
-        member_ref.parent[member_ref.index_in_parent] = replacement
-        member_ref.resolved = True
+    # Convert a .NET Collections.ArrayList or .Generic.List into a Python list
+    def _do_convertto_list(self, collection):
+        converted = collection.items[:collection.size]
+        # If any list element is a _MemberReference, fix its parent
+        for element in converted:
+            if isinstance(element, self._MemberReference):
+                element.parent = converted  # (the index_in_parent remains the same)
+        return converted
+    #
+    _convert_arraylist    = _do_convertto_list
+    _convert_generic_list = _do_convertto_list
+
+    # Replace a _MemberReference with its final referenced object, optionally ignoring
+    # any unresolvable reference (which should point to a not-yet-converted collection)
+    def _resolve_reference(self, reference, ignore_unresolvable = False):
+        replacement = self._objects_by_id.get(reference.id)
+        if replacement is not None:
+            reference.parent[reference.index_in_parent] = replacement
+            reference.resolved = True
+        elif not ignore_unresolvable:
+            raise RuntimeError(f'Unresolvable MemberReference with ObjectId {reference.id}')
 
 
     def overwrite_member(self, obj, member, value):
@@ -690,6 +710,8 @@ class JSONEncoder(json.JSONEncoder):
             return d
         if isinstance(o, Array):
             return o.tolist()
+        if isinstance(o, set):
+            return list(o)
         if isinstance(o, (datetime, timedelta)):
             return str(o)
         if isinstance(o, Decimal):
