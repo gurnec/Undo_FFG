@@ -67,8 +67,12 @@ class serialization:
         self._root_id               = None  # the id of the single root object
         self._member_references     = []    # all seen simple references, see _read_MemberReference()
         self._collection_references = []    # all seen collection references, e.g. .NET dicts and lists
-        self._add_overwrite_info     = can_overwrite_member
-        self._overwrite_info_by_pyid = {}   # if above is True, overwrite_info objs indexed by python id()
+        self._add_overwrite_info    = can_overwrite_member
+        # If can_overwrite_member is True, the below is a dict indexed by an object's python id();
+        # each value contains multiple _OverwriteInfo objects, and has the same layout as the object
+        self._overwrite_infos_by_pyid = {} if can_overwrite_member else None
+
+    _OverwriteInfo = namedtuple('_OverwriteInfo', 'pos format')  # file.tell() and struct format string
 
     # Below are a set of "readers" and other support types, one per defined structure in
     # revisions 10.0-12.0 of the ".NET Remoting: Binary Format Data Structure" specification
@@ -287,23 +291,23 @@ class serialization:
         return self._read_members_into(Class(), object_id, Class._primitive_types.get)
 
     # If primitive_type is not None, read the specified primitive_type with one of the
-    # PrimitiveType_readers. Otherwise read the next RecordType in the streamfile with
-    # one of the RecordType_readers. If overwrite_info is not None, add overwrite info
-    # (a tuple containing: file position, struct type) to overwrite_info[overwrite_index]
-    # if the value read is an overwritable primitive. Finally, returns the value read.
-    def _read_Record_or_Primitive(self, primitive_type, overwrite_info = None, overwrite_index = None):
+    # PrimitiveType_readers. Otherwise read the next RecordType in the streamfile with one
+    # of the RecordType_readers. If overwrite_infos is not None, adds an _OverwriteInfo
+    # object to overwrite_infos[overwrite_index] for each value read that is an overwritable
+    # primitive. Finally, returns the value read.
+    def _read_Record_or_Primitive(self, primitive_type, overwrite_infos = None, overwrite_index = None):
         if primitive_type:
-            if overwrite_info is not None:
+            if overwrite_infos is not None:
                 format = self._struct_format_by_primitive_type.get(primitive_type)
                 if format:
-                    overwrite_info[overwrite_index] = self._file.tell(), format
+                    overwrite_infos[overwrite_index] = self._OverwriteInfo(self._file.tell(), format)
             return self._PrimitiveType_readers[primitive_type](self)
         else:
             record_type = self._file.read(1)
-            # If overwrite_info is not None and record_type == MemberPrimitiveTyped, parse it ourselves--
-            # read in the PrimitiveTypeEnum and call ourselves to finish parsing and add the overwrite_info
-            if overwrite_info is not None and record_type == b'\x08':
-                return self._read_Record_or_Primitive(self._file.read(1), overwrite_info, overwrite_index)
+            # If overwrite_infos is not None and record_type == MemberPrimitiveTyped, parse it ourselves--
+            # read in the PrimitiveTypeEnum and call ourselves to finish parsing and add the _OverwriteInfo
+            if overwrite_infos is not None and record_type == b'\x08':
+                return self._read_Record_or_Primitive(self._file.read(1), overwrite_infos, overwrite_index)
             return self._RecordType_readers[record_type](self)
 
     _Reference = namedlist('_Reference',  # see _read_MemberReference()
@@ -313,16 +317,16 @@ class serialization:
     def _read_members_into(self, obj, object_id, members_primitive_type):
         assert callable(members_primitive_type)  # when called with the member_num, returns any respective primitive type
         if self._add_overwrite_info:
-            # create the object which will store the overwrite info for all the members in obj
-            overwrite_info = [None] * len(obj) if isinstance(obj, list) else obj.__class__()
+            # create the object which will store the _OverwriteInfo objects for each overwritable member in obj
+            overwrite_infos = [None] * len(obj) if isinstance(obj, list) else obj.__class__()
         else:
-            overwrite_info = None
+            overwrite_infos = None
         member_num = 0
         while member_num < len(obj):
             primitive_type = members_primitive_type(member_num)
-            val = self._read_Record_or_Primitive(primitive_type, overwrite_info, member_num)
+            val = self._read_Record_or_Primitive(primitive_type, overwrite_infos, member_num)
             if isinstance(val, self._BinaryLibrary):  # a BinaryLibrary can precede the actual member, it's ignored
-                val = self._read_Record_or_Primitive(primitive_type, overwrite_info, member_num)
+                val = self._read_Record_or_Primitive(primitive_type, overwrite_infos, member_num)
             if isinstance(val, self._ObjectNullMultiple):  # represents one or more empty members
                 member_num += val.count
                 continue
@@ -331,8 +335,8 @@ class serialization:
                 val.index_in_parent = member_num
             obj[member_num] = val
             member_num += 1
-        if overwrite_info is not None:
-            self._overwrite_info_by_pyid[id(obj)] = overwrite_info
+        if overwrite_infos is not None:
+            self._overwrite_infos_by_pyid[id(obj)] = overwrite_infos
         # If this object is a .NET collection (e.g. a Generic dict or list) which can be
         # replaced by a native Python type, insert a collection _Reference instead of the raw
         # object which will be resolved later in read_stream() using a "collection resolver"
@@ -433,13 +437,13 @@ class serialization:
 
     def _read_Array_native_elements(self, format, length):
         if self._add_overwrite_info:
-            pos = self._file.tell()
+            initial_pos = self._file.tell()
         array_struct = Struct(f'<{length}{format}')
         array = Array(format, array_struct.unpack(self._file.read(array_struct.size)))
         if self._add_overwrite_info:
             format = '<' + format  # always little-endian
-            self._overwrite_info_by_pyid[id(array)] = [
-                (pos + offset, format) for offset in range(0, array_struct.size, calcsize(format)) ]
+            self._overwrite_infos_by_pyid[id(array)] = [ self._OverwriteInfo(pos, format)
+                for pos in range(initial_pos, initial_pos + array_struct.size, calcsize(format)) ]
         return array
 
 
@@ -554,8 +558,8 @@ class serialization:
         # If KeyValuePairs is itself a _Reference, it must be resolved first
         if isinstance(orig_obj.KeyValuePairs, self._Reference):
             self._resolve_simple_reference(orig_obj.KeyValuePairs)
-        replacement    = {}
-        overwrite_info = {} if self._add_overwrite_info else None
+        replacement     = {}
+        overwrite_infos = {} if self._add_overwrite_info else None
         for item in orig_obj.KeyValuePairs:
             try:
                 # If any key is a _Reference, it must be resolved first
@@ -564,8 +568,8 @@ class serialization:
                     self._resolve_simple_reference(item.key)
                 assert item.key not in replacement
                 replacement[item.key] = item.value
-                if overwrite_info is not None:
-                    overwrite_info[item.key] = self._overwrite_info_by_pyid[id(item)].value
+                if overwrite_infos is not None:
+                    overwrite_infos[item.key] = self._overwrite_infos_by_pyid[id(item)].value
             except (AssertionError, TypeError):  # not all .NET dictionaries can be converted to Python dicts;
                 replacement = orig_obj           # if the conversion fails, just proceed w/the original object
                 break
@@ -575,8 +579,8 @@ class serialization:
                 if isinstance(value, self._Reference):
                     value.parent          = replacement
                     value.index_in_parent = key
-            if overwrite_info is not None:
-                self._overwrite_info_by_pyid[id(replacement)] = overwrite_info
+            if overwrite_infos is not None:
+                self._overwrite_infos_by_pyid[id(replacement)] = overwrite_infos
         return replacement
 
     # Convert a _Reference representing a .NET list collection into a Python list
@@ -618,15 +622,15 @@ class serialization:
         :param value: the new value to be written to the streamfile
         '''
         assert self._add_overwrite_info, 'serialization object must have been constructed with can_overwrite_member == True'
-        overwrite_info = self._overwrite_info_by_pyid[id(obj)]
+        overwrite_infos = self._overwrite_infos_by_pyid[id(obj)]
         if isinstance(member, int) or isinstance(obj, dict):
-            pos, format = overwrite_info[member]
+            overwrite_info = overwrite_infos[member]
         else:
-            pos, format = getattr(overwrite_info, member)
-        value   = pack(format, value)
+            overwrite_info = getattr(overwrite_infos, member)
+        value   = pack(overwrite_info.format, value)
         old_pos = self._file.tell()
         try:
-            self._file.seek(pos)
+            self._file.seek(overwrite_info.pos)
             self._file.write(value)
         finally:
             self._file.seek(old_pos)
@@ -639,13 +643,13 @@ class serialization:
         :param member: a member (attribute) name, index (for lists/arrays), or key (for dicts) in obj
         '''
         assert self._add_overwrite_info, 'serialization object must have been constructed with can_overwrite_member == True'
-        overwrite_info = self._overwrite_info_by_pyid.get(id(obj))
-        if overwrite_info is None:
+        overwrite_infos = self._overwrite_infos_by_pyid.get(id(obj))
+        if overwrite_infos is None:
             return False
         if isinstance(member, int) or isinstance(obj, dict):
-            return overwrite_info[member]          is not None
+            return overwrite_infos[member]          is not None
         else:
-            return getattr(overwrite_info, member) is not None
+            return getattr(overwrite_infos, member) is not None
 
 
 # Finish setting up the serialization class
