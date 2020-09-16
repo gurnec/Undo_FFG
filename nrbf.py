@@ -171,6 +171,9 @@ class serialization:
         self._read_LengthPrefixedString()  # TypeName
         self._read_Int32()                 # LibraryId
 
+    # The next few sections are commented out because they're only needed by
+    # _read_BinaryMethodCall and _read_BinaryMethodReturn which aren't implemented
+
     # @enum.unique
     # class _MessageFlags(enum.Flag):
     #     NoArgs                 = 0x00000001
@@ -189,13 +192,13 @@ class serialization:
     #     ExceptionInArray       = 0x00002000
     #     GenericMethod          = 0x00008000
 
-    def _read_ValueWithCode(self):
-        return self._PrimitiveType_readers[self._file.read(1)](self)
+    # def _read_ValueWithCode(self):
+    #     return self._PrimitiveType_readers[self._file.read(1)](self)
 
-    _read_StringValueWithCode = _read_ValueWithCode
+    # _read_StringValueWithCode = _read_ValueWithCode
 
-    def _read_ArrayOfValueWithCode(self):
-        return [self._read_ValueWithCode() for i in range(self._read_Int32())]
+    # def _read_ArrayOfValueWithCode(self):
+    #     return [self._read_ValueWithCode() for i in range(self._read_Int32())]
 
 
     # A dict of all RecordType readers indexed by a length-one RecordTypeEnumeration bytes object
@@ -443,8 +446,11 @@ class serialization:
                 for pos in range(initial_pos, initial_pos + array_struct.size, calcsize(format)) ]
         return array
 
-
-    _read_MemberPrimitiveTyped = _register_reader(_RecordType_readers, 8)(_read_ValueWithCode)
+    # Shouldn't ever be called because it's implemented in _read_Record_or_Primitive()
+    # _read_MemberPrimitiveTyped = _register_reader(_RecordType_readers, 8)(_read_ValueWithCode)
+    @_register_reader(_RecordType_readers, 8)
+    def _read_MemberPrimitiveTyped(self):
+        assert False
 
     # Wherever an ObjectId is encountered above, it's added to the self._objects_by_id dict
     # along with the newly-created object. A MemberReference contains an IdRef which refers to
@@ -696,8 +702,8 @@ serialization._AdditionalInfo_readers = (
 
 # Now that we're done adding PrimitiveType and RecordType readers, ensure they're
 # all present (except PrimitiveType 4 and RecordTypes 18-20 which aren't defined)
-assert all(bytes([i]) in serialization._PrimitiveType_readers if i != 4            else True for i in range(1, 19))
-assert all(bytes([i]) in serialization._RecordType_readers    if not 18 <= i <= 20 else True for i in range(23))
+assert all(bytes([i]) in serialization._PrimitiveType_readers for i in range(1, 19) if i != 4)
+assert all(bytes([i]) in serialization._RecordType_readers    for i in range(23)    if not 18 <= i <= 20)
 
 
 def read_stream(streamfile):
