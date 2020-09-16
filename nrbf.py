@@ -726,9 +726,9 @@ def multidimensional_array(lengths):
 if __name__ == '__main__':
     if len(sys.argv) != 2:
         sys.exit(f'Usage: {sys.argv[0]} streamfile')
-    json_encoder = JSONEncoder(indent=4)
     with open(sys.argv[1], 'rb') as streamfile:
         while True:
-            print(json_encoder.encode(read_stream(streamfile)))
+            json.dump(read_stream(streamfile), sys.stdout, cls=JSONEncoder, indent=4)
+            print()
             if streamfile.peek(1) == b'':
                 break
