@@ -242,7 +242,7 @@ class serialization:
         Class._primitive_types = {}  # filled in below by _read_MemberTypeInfo()
         # Check to see if there is a converter method which can convert this type from a .NET
         # Collection (e.g. an ArrayList or Generic.List) to a native python type, and store it.
-        if class_name.startswith(f'System.Collections.'):
+        if class_name.startswith('System.Collections.'):
             short_name = class_name[19:].split('`', 1)[0]  # strip 'System.Collections.' and any type params after backtick
             short_name = short_name.replace('.', '_').lower()  # e.g. 'arraylist' or 'generic_list'
             converter = getattr(self, f'_convert_{short_name}', None)
@@ -299,7 +299,7 @@ class serialization:
     # primitive. Finally, returns the value read.
     def _read_Record_or_Primitive(self, primitive_type, overwrite_infos = None, overwrite_index = None):
         if primitive_type:
-            if overwrite_infos is not None:
+            if overwrite_infos:
                 format = self._struct_format_by_primitive_type.get(primitive_type)
                 if format:
                     overwrite_infos[overwrite_index] = self._OverwriteInfo(self._file.tell(), format)
@@ -308,14 +308,14 @@ class serialization:
             record_type = self._file.read(1)
             # If overwrite_infos is not None and record_type == MemberPrimitiveTyped, parse it ourselves--
             # read in the PrimitiveTypeEnum and call ourselves to finish parsing and add the _OverwriteInfo
-            if overwrite_infos is not None and record_type == b'\x08':
+            if overwrite_infos and record_type == b'\x08':
                 return self._read_Record_or_Primitive(self._file.read(1), overwrite_infos, overwrite_index)
             return self._RecordType_readers[record_type](self)
 
     # Represents an NRBF MemberReference, see _read_MemberReference()
     _MemberReference = namedlist('_MemberReference', 'id parent index_in_parent resolved', default=None)
 
-    # Reads members or array elements into the 'obj' pre-allocated list or class instance
+    # Reads list elements or members into the 'obj' pre-allocated list or namedlist instance
     def _read_members_into(self, obj, object_id, members_primitive_type):
         assert callable(members_primitive_type)  # when called with the member_num, returns any respective primitive type
         if self._add_overwrite_info:
@@ -337,7 +337,7 @@ class serialization:
                 val.index_in_parent = member_num
             obj[member_num] = val
             member_num += 1
-        if overwrite_infos is not None:
+        if overwrite_infos and any(overwrite_infos):
             self._overwrite_infos_by_pyid[id(obj)] = overwrite_infos
         # Convertible collections are added to _objects_by_id after their conversion in read_stream()
         if hasattr(obj.__class__, '_convert_collection'):
@@ -570,12 +570,14 @@ class serialization:
     def _do_convertto_dict(self, collection, collection_iter):
         converted       = {}
         overwrite_infos = {} if self._add_overwrite_info else None
+        added_overwrite = False
         for key, value, values_overwrite_info in collection_iter(collection):
             try:
                 assert key not in converted
                 converted[key] = value
-                if overwrite_infos is not None:
+                if values_overwrite_info:
                     overwrite_infos[key] = values_overwrite_info
+                    added_overwrite = True
             except (AssertionError, TypeError):  # not all .NET key-value Collections can be converted to Python dicts;
                 return collection                # if the conversion fails, just proceed w/the original object
         # If any dict value is a _MemberReference, fix its parent and index_in_parent
@@ -583,7 +585,7 @@ class serialization:
             if isinstance(value, self._MemberReference):
                 value.parent          = converted
                 value.index_in_parent = key
-        if overwrite_infos is not None:
+        if added_overwrite:
             self._overwrite_infos_by_pyid[id(converted)] = overwrite_infos
         return converted
 
@@ -593,11 +595,12 @@ class serialization:
     #
     # Iterate over each key, value, and value's _OverwriteInfo in a .NET Collections.HashTable
     def _hashtable_iter(self, collection):
-        len_values = len(collection.Values)
+        values     = collection.Values
+        len_values = len(values)
+        overwrite_infos = self._overwrite_infos_by_pyid.get(id(values)) if self._add_overwrite_info else None
         for i, key in enumerate(collection.Keys):
             if i < len_values:
-                yield key, collection.Values[i], \
-                      self._overwrite_infos_by_pyid[id(collection.Values)][i] if self._add_overwrite_info else None
+                yield key, values[i], overwrite_infos[i] if overwrite_infos else None
             else:
                 yield key, None, None
 
@@ -608,12 +611,16 @@ class serialization:
     # Iterate over each key, value, and _OverwriteInfo in a .NET Collections.Generic.Dictionary
     def _generic_dictionary_iter(self, collection):
         for item in collection.KeyValuePairs:
-            yield item.key, item.value, \
-                  self._overwrite_infos_by_pyid[id(item)].value if self._add_overwrite_info else None
+            overwrite_infos = self._overwrite_infos_by_pyid.get(id(item)) if self._add_overwrite_info else None
+            yield item.key, item.value, overwrite_infos.value if overwrite_infos else None
 
     # Convert a .NET Collections.ArrayList or .Generic.List into a Python list
     def _do_convertto_list(self, collection):
         converted = collection.items[:collection.size]
+        if self._add_overwrite_info:
+            overwrite_infos = self._overwrite_infos_by_pyid.get(id(collection.items))
+            if overwrite_infos:
+                self._overwrite_infos_by_pyid[id(converted)] = overwrite_infos
         # If any list element is a _MemberReference, fix its parent
         for element in converted:
             if isinstance(element, self._MemberReference):
@@ -666,10 +673,11 @@ class serialization:
         overwrite_infos = self._overwrite_infos_by_pyid.get(id(obj))
         if overwrite_infos is None:
             return False
-        if isinstance(member, int) or isinstance(obj, dict):
-            return overwrite_infos[member]          is not None
-        else:
-            return getattr(overwrite_infos, member) is not None
+        if isinstance(obj, dict):
+            return overwrite_infos.get(member)  is not None
+        if isinstance(member, int):
+            return overwrite_infos[member]      is not None
+        return getattr(overwrite_infos, member) is not None
 
 
 # Finish setting up the serialization class
