@@ -431,18 +431,15 @@ class serialization:
             return array
         return self._read_members_into([None] * length, object_id, lambda i: primitive_type)
 
-    assert sys.byteorder in ('little', 'big')
     def _read_Array_native_elements(self, format, length):
         if self._add_overwrite_info:
             pos = self._file.tell()
-        array = Array(format)
-        array.fromfile(self._file, length)  # read them in one call
-        if sys.byteorder == 'big':
-            array.byteswap()
+        array_struct = Struct(f'<{length}{format}')
+        array = Array(format, array_struct.unpack(self._file.read(array_struct.size)))
         if self._add_overwrite_info:
             format = '<' + format  # always little-endian
             self._overwrite_info_by_pyid[id(array)] = [
-                (pos + offset, format) for offset in range(0, length * array.itemsize, array.itemsize) ]
+                (pos + offset, format) for offset in range(0, array_struct.size, calcsize(format)) ]
         return array
 
 
