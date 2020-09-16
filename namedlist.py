@@ -41,7 +41,7 @@ import operator as _operator
 import itertools as _itertools
 from keyword import iskeyword as _iskeyword
 import collections as _collections
-import abc as _abc
+from reprlib import recursive_repr
 
 _PY2 = _sys.version_info[0] == 2
 _PY3 = _sys.version_info[0] == 3
@@ -272,6 +272,7 @@ def _fields_and_defaults(typename, field_names, default, rename):
 ########################################################################
 # Common member functions for the generated classes.
 
+@recursive_repr()
 def _repr(self):
     return '{0}({1})'.format(self.__class__.__name__, ', '.join('{0}={1!r}'.format(name, getattr(self, name)) for name in self._fields))
 
