@@ -1,5 +1,5 @@
 # nrbf.py - .NET Remoting Binary Format reading library for Python 3.6+
-# Copyright (C) 2017, 2020 Christopher Gurnee
+# Copyright (C) 2017, 2020, 2021 Christopher Gurnee
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -34,7 +34,7 @@ from copy        import deepcopy
 from datetime    import datetime, timedelta, timezone
 from decimal     import Decimal
 from keyword     import iskeyword
-from struct      import Struct, calcsize, pack
+from struct      import Struct, pack
 from contextlib  import suppress
 from namedlist   import namedlist
 
@@ -139,32 +139,39 @@ class serialization:
     def _read_Null(self):
         return None
 
-    # Creates the rest of the PrimitiveType readers (those based on struct.unpack);
+    # Creates the rest of the PrimitiveType readers (those based on struct.unpack),
+    # and also initializes the two class variables (both dicts) below;
     # this only works when it's called after the class has been fully defined.
     _array_format_by_primitive_type  = {}  # array-format-specs  indexed by PrimitiveTypeEnumeration length-one bytes
     _struct_format_by_primitive_type = {}  # struct-format-specs indexed by PrimitiveTypeEnumeration length-one bytes
     @classmethod
     def _create_PrimitiveType_readers(cls):
-        for enum_value, name, format in (
-                ( 1, '_read_Boolean',  '?'),
-                ( 2, '_read_Byte',     'B'),
-                ( 6, '_read_Double',  '<d'),
-                ( 7, '_read_Int16',   '<h'),
-                ( 8, '_read_Int32',   '<l'),
-                ( 9, '_read_Int64',   '<q'),
-                (10, '_read_SByte',    'b'),
-                (11, '_read_Single',  '<f'),
-                (14, '_read_UInt16',  '<H'),
-                (15, '_read_UInt32',  '<L'),
-                (16, '_read_UInt64',  '<Q')):
+        array_typesizes = {t : Array(t).itemsize  for t in typecodes}
+        for enum_value, name, format, signed in (
+                ( 1, '_read_Boolean', '<?', None ),
+                ( 2, '_read_Byte',    '<B', False),
+                ( 6, '_read_Double',  '<d', None ),
+                ( 7, '_read_Int16',   '<h', True ),
+                ( 8, '_read_Int32',   '<i', True ),
+                ( 9, '_read_Int64',   '<q', True ),
+                (10, '_read_SByte',   '<b', True ),
+                (11, '_read_Single',  '<f', None ),
+                (14, '_read_UInt16',  '<H', False),
+                (15, '_read_UInt32',  '<I', False),
+                (16, '_read_UInt64',  '<Q', False)):
             enum_value = bytes([enum_value])  # convert from int to length-one bytes
-            if format[-1] in typecodes:  # if the format can also be used to create an array type
-                cls._array_format_by_primitive_type[enum_value] = format[-1]  # (the [-1] skips the '<' flag)
-            cls._struct_format_by_primitive_type[enum_value] = format
             struct = Struct(format)
-            length = calcsize(format)
-            reader = lambda self, s=struct, l=length: s.unpack(self._file.read(l))[0]
+            reader = lambda self, s=struct: s.unpack(self._file.read(s.size))[0]
             setattr(cls, name, _register_reader(cls._PrimitiveType_readers, enum_value)(reader))
+            cls._struct_format_by_primitive_type[enum_value] = format
+            array_formats = ''
+            if signed is not None:
+                array_formats = 'bhilq' if signed else 'BHILQ'  # all integer array formats of one signedness
+            elif name in ('_read_Single', '_read_Double'):
+                array_formats = 'fd'                            # all floating-point array formats
+            with suppress(StopIteration):
+                cls._array_format_by_primitive_type[enum_value] = next(f          # the first array-format (f), if any,
+                    for f in array_formats if array_typesizes[f] == struct.size)  # whose size matches the struct-format's
 
     # The ClassTypeInfo structure is read and ignored
     def _read_ClassTypeInfo(self):
@@ -328,10 +335,9 @@ class serialization:
             overwrite_infos = None
         member_num = 0
         while member_num < len(obj):
-            primitive_type = members_primitive_type(member_num)
-            val = self._read_Record_or_Primitive(primitive_type, overwrite_infos, member_num)
-            if isinstance(val, self._BinaryLibrary):  # a BinaryLibrary can precede the actual member, it's ignored
-                val = self._read_Record_or_Primitive(primitive_type, overwrite_infos, member_num)
+            val = self._read_Record_or_Primitive(members_primitive_type(member_num), overwrite_infos, member_num)
+            if isinstance(val, self._BinaryLibrary):  # a BinaryLibrary can precede a non-primitive member; it's ignored
+                val = self._read_Record_or_Primitive(None, overwrite_infos, member_num)
             if isinstance(val, self._ObjectNullMultiple):  # represents one or more empty members
                 member_num += val.count
                 continue
@@ -384,21 +390,21 @@ class serialization:
         primitive_type  = additional_info if binary_type == 0 else None  # (0 == BinaryTypeEnumeration.Primitive)
         # If the BinaryArray is multidimensional, the complex code branch is required:
         if array_type.is_rectangular():
-            array_format = self._array_format_by_primitive_type.get(primitive_type) if primitive_type else None
-            if array_format:  # if not None, a Python Array can be used for the *last* dimension...
+            supports_Array = primitive_type and primitive_type in self._array_format_by_primitive_type
+            if supports_Array:  # if True, a Python Array can be used for the *last* dimension...
                 array_length = lengths.pop()  # ...which is removed from the lengths list here
             array = multidimensional_array(lengths)  # preallocate a list of lists (it's not a Python Array)
             skip  = 0
             for indexes in itertools.product(*[range(l) for l in lengths]):  # iterates through all of the indexes
-                if array_format:
-                    val = self._read_Array_native_elements(array_format, array_length)  # read in the last index in one call
+                if supports_Array:
+                    val = self._read_Array_native_elements(array_length, primitive_type)  # read last index in one call
                 else:
                     if skip > 0:
                         skip -= 1
                         continue
                     val = self._read_Record_or_Primitive(primitive_type)
-                    if isinstance(val, self._BinaryLibrary):   # a BinaryLibrary can precede the actual array element, it's ignored
-                        val = self._read_Record_or_Primitive(primitive_type)
+                    if isinstance(val, self._BinaryLibrary):  # a BinaryLibrary can precede a non-primitive array element; it's ignored
+                        val = self._read_Record_or_Primitive(None)
                     if isinstance(val, self._ObjectNullMultiple):  # represents one or more empty elements
                         skip = val.count - 1  # counts this iteration which we're skipping right now
                         continue
@@ -428,22 +434,25 @@ class serialization:
     _read_ArraySingleString = _register_reader(_RecordType_readers, 17)(_read_ArraySingleObject)
 
     def _read_Array_elements(self, length, object_id, primitive_type = None):
-        array_format = self._array_format_by_primitive_type.get(primitive_type) if primitive_type else None
-        if array_format:  # if not None, a Python Array can be used
-            array = self._read_Array_native_elements(array_format, length)
+        if primitive_type and primitive_type in self._array_format_by_primitive_type:
+            array = self._read_Array_native_elements(length, primitive_type)
             self._objects_by_id[object_id] = array
             return array
         return self._read_members_into([None] * length, object_id, lambda i: primitive_type)
 
-    def _read_Array_native_elements(self, format, length):
+    def _read_Array_native_elements(self, length, primitive_type):
         if self._add_overwrite_info:
             initial_pos = self._file.tell()
-        array_struct = Struct(f'<{length}{format}')
-        array = Array(format, array_struct.unpack(self._file.read(array_struct.size)))
+        array = Array(self._array_format_by_primitive_type[primitive_type])
+        array.fromfile(self._file, length)  # read them in one call
+        if sys.byteorder == 'big' and array.itemsize > 1:
+            array.byteswap()
         if self._add_overwrite_info:
-            format = '<' + format  # always little-endian
+            final_pos = self._file.tell()
+            assert final_pos == length * array.itemsize + initial_pos
+            format = self._struct_format_by_primitive_type[primitive_type]
             self._overwrite_infos_by_pyid[id(array)] = [ self._OverwriteInfo(pos, format)
-                for pos in range(initial_pos, initial_pos + array_struct.size, calcsize(format)) ]
+                for pos in range(initial_pos, final_pos, array.itemsize) ]
         return array
 
     # Shouldn't ever be called because it's implemented in _read_Record_or_Primitive()
