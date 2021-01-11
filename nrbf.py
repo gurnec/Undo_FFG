@@ -534,6 +534,8 @@ class serialization:
         obj = None
         while not isinstance(obj, self._MessageEnd):
             obj = self._read_Record_or_Primitive(primitive_type=False)
+        for cls in self._Class_by_id.values():
+            del cls._primitive_types
         self._Class_by_id.clear()
 
         # Resolve MemberReferences, ignoring failures (refs to convertible collections can't yet be resolved)
