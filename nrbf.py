@@ -89,14 +89,16 @@ class serialization:
 
     @_register_reader(_PrimitiveType_readers, 3)
     def _read_Char(self):
-        utf8_bytes = bytearray()
-        while True:
-            utf8_bytes += self._file.read(1)
-            try:
-                return utf8_bytes.decode('utf-8')
-            except UnicodeDecodeError:
-                if len(utf8_bytes) >= 4:
-                    raise
+        first_byte = self._file.read(1)
+        if   first_byte[0] < 0b_1100_0000:
+            return first_byte.decode('utf-8')
+        elif first_byte[0] < 0b_1110_0000:
+            more_bytes = 1
+        elif first_byte[0] < 0b_1111_0000:
+            more_bytes = 2
+        else:
+            more_bytes = 3
+        return (first_byte + self._file.read(more_bytes)).decode('utf-8')
 
     @_register_reader(_PrimitiveType_readers, 12)
     def _read_TimeSpan(self):
